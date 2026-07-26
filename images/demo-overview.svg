@@ -1,0 +1,120 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 500" font-family="-apple-system, BlinkMacSystemFont, sans-serif">
+  <defs>
+    <linearGradient id="header" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" style="stop-color:#667eea"/>
+      <stop offset="100%" style="stop-color:#764ba2"/>
+    </linearGradient>
+    <filter id="shadow">
+      <feDropShadow dx="0" dy="2" stdDeviation="6" flood-opacity="0.1"/>
+    </filter>
+  </defs>
+
+  <!-- Background -->
+  <rect width="800" height="500" fill="#f5f5f7" rx="12"/>
+
+  <!-- Browser mockup -->
+  <rect x="30" y="20" width="450" height="460" fill="white" rx="8" filter="url(#shadow)"/>
+  <rect x="30" y="20" width="450" height="35" fill="#f0f0f0" rx="8"/>
+  <rect x="30" y="45" width="450" height="10" fill="#f0f0f0"/>
+  <!-- URL bar -->
+  <rect x="100" y="28" width="200" height="18" fill="white" rx="4" stroke="#ddd" stroke-width="1"/>
+  <text x="110" y="41" font-size="10" fill="#999">arxiv.org/abs/2607.10848</text>
+
+  <!-- Page content -->
+  <rect x="50" y="70" width="410" height="20" fill="#eee" rx="3"/>
+  <rect x="50" y="100" width="410" height="6" fill="#eee" rx="3"/>
+  <rect x="50" y="114" width="390" height="6" fill="#eee" rx="3"/>
+  <rect x="50" y="128" width="370" height="6" fill="#eee" rx="3"/>
+  <rect x="50" y="142" width="400" height="6" fill="#eee" rx="3"/>
+  <rect x="50" y="156" width="380" height="6" fill="#eee" rx="3"/>
+
+  <!-- Highlighted text -->
+  <rect x="50" y="170" width="410" height="6" fill="#eee" rx="3"/>
+  <rect x="50" y="184" width="350" height="6" fill="#eee" rx="3"/>
+  <!-- Yellow highlight -->
+  <rect x="50" y="198" width="280" height="18" fill="#FFF9C4" rx="3"/>
+  <text x="55" y="211" font-size="11" fill="#333">self-attention computes relevance between all positions</text>
+  <rect x="50" y="220" width="390" height="6" fill="#eee" rx="3"/>
+  <rect x="50" y="234" width="400" height="6" fill="#eee" rx="3"/>
+  <!-- Green highlight -->
+  <rect x="50" y="248" width="240" height="18" fill="#C8E6C9" rx="3"/>
+  <text x="55" y="261" font-size="11" fill="#333">o3 model uses chain-of-thought reasoning</text>
+  <rect x="50" y="270" width="370" height="6" fill="#eee" rx="3"/>
+  <rect x="50" y="284" width="390" height="6" fill="#eee" rx="3"/>
+  <!-- Blue highlight -->
+  <rect x="50" y="298" width="260" height="18" fill="#BBDEFB" rx="3"/>
+  <text x="55" y="311" font-size="11" fill="#333">DeepSeek-V3: 671B total, 37B activated per token</text>
+
+  <!-- Floating toolbar -->
+  <rect x="120" y="170" width="260" height="36" fill="white" rx="8" filter="url(#shadow)" stroke="#e0e0e0" stroke-width="1"/>
+  <!-- Color circles -->
+  <circle cx="140" cy="188" r="10" fill="#FFF9C4" stroke="#FDD835" stroke-width="2"/>
+  <circle cx="166" cy="188" r="10" fill="#C8E6C9"/>
+  <circle cx="192" cy="188" r="10" fill="#BBDEFB"/>
+  <circle cx="218" cy="188" r="10" fill="#FFCDD2"/>
+  <circle cx="244" cy="188" r="10" fill="#E1BEE7"/>
+  <circle cx="270" cy="188" r="10" fill="#FFE0B2"/>
+  <circle cx="296" cy="188" r="10" fill="#F8BBD0"/>
+  <!-- Note input -->
+  <rect x="314" y="177" width="50" height="20" fill="white" rx="4" stroke="#ddd" stroke-width="1"/>
+  <text x="320" y="191" font-size="9" fill="#bbb">备注...</text>
+  <!-- Save button -->
+  <rect x="370" y="177" width="30" height="20" fill="#667eea" rx="4"/>
+  <text x="378" y="191" font-size="11" fill="white" font-weight="bold">✓</text>
+
+  <!-- Right side: spotlight -->
+  <rect x="510" y="20" width="260" height="460" fill="white" rx="8" filter="url(#shadow)"/>
+  <rect x="510" y="20" width="260" height="35" fill="rgba(102,126,234,0.1)" rx="8"/>
+  <rect x="510" y="45" width="260" height="10" fill="rgba(102,126,234,0.1)"/>
+  <text x="540" y="43" font-size="13" font-weight="bold" fill="#333">📌 Highlights Everywhere</text>
+
+  <!-- Search bar -->
+  <rect x="525" y="65" width="230" height="28" fill="#f0f0f5" rx="6"/>
+  <text x="535" y="83" font-size="11" fill="#999">🔍  搜索高亮内容...</text>
+
+  <!-- Color filter -->
+  <rect x="525" y="100" width="100" height="24" fill="white" rx="4" stroke="#ddd" stroke-width="1"/>
+  <text x="535" y="116" font-size="10" fill="#666">全部颜色 ▾</text>
+
+  <!-- Highlight card 1 - yellow -->
+  <rect x="525" y="135" width="230" height="85" fill="white" rx="8" stroke="#eee" stroke-width="1"/>
+  <rect x="525" y="135" width="4" height="85" fill="#FDD835" rx="2"/>
+  <text x="540" y="155" font-size="9" fill="#999">2026-07-26 01:06</text>
+  <rect x="540" y="162" width="200" height="30" fill="#FFF9C4" rx="4"/>
+  <text x="545" y="180" font-size="10" fill="#5D4037">Transformer 的核心是 self-attention</text>
+  <text x="545" y="200" font-size="9" fill="#667eea" font-weight="bold">💬 面试重点</text>
+
+  <!-- Highlight card 2 - green -->
+  <rect x="525" y="230" width="230" height="70" fill="white" rx="8" stroke="#eee" stroke-width="1"/>
+  <rect x="525" y="230" width="4" height="70" fill="#66BB6A" rx="2"/>
+  <text x="540" y="250" font-size="9" fill="#999">2026-07-26 01:06</text>
+  <rect x="540" y="257" width="200" height="18" fill="#C8E6C9" rx="4"/>
+  <text x="545" y="270" font-size="10" fill="#1B5E20">o3 模型采用链式思维推理</text>
+
+  <!-- Stats -->
+  <text x="525" y="330" font-size="11" fill="#666">共 5 条高亮 · 4 网页 · 1 笔记</text>
+
+  <!-- Edit popup -->
+  <rect x="550" y="345" width="190" height="120" fill="white" rx="8" filter="url(#shadow)" stroke="#e0e0e0" stroke-width="1"/>
+  <text x="560" y="365" font-size="10" fill="#666">🖍 <tspan font-weight="bold">黄色</tspan></text>
+  <text x="560" y="382" font-size="11" fill="#333">Transformer 的核心是...</text>
+  <!-- Edit color picker -->
+  <circle cx="562" cy="398" r="8" fill="#FFF9C4" stroke="#333" stroke-width="2"/>
+  <circle cx="582" cy="398" r="8" fill="#C8E6C9"/>
+  <circle cx="602" cy="398" r="8" fill="#BBDEFB"/>
+  <circle cx="622" cy="398" r="8" fill="#FFCDD2"/>
+  <circle cx="642" cy="398" r="8" fill="#E1BEE7"/>
+  <!-- Edit textarea -->
+  <rect x="560" y="412" width="170" height="20" fill="#f8f8fa" rx="4" stroke="#ddd" stroke-width="1"/>
+  <text x="565" y="426" font-size="9" fill="#666">面试重点：Transformer 核心机制</text>
+  <!-- Edit buttons -->
+  <rect x="560" y="438" width="80" height="20" fill="#667eea" rx="4"/>
+  <text x="590" y="452" font-size="10" fill="white" font-weight="bold" text-anchor="middle">保存</text>
+  <rect x="650" y="438" width="80" height="20" fill="#fee" rx="4" stroke="#fcc" stroke-width="1"/>
+  <text x="685" y="452" font-size="10" fill="#c33" text-anchor="middle">🗑 删除</text>
+
+  <!-- Arrow from color to highlight -->
+  <line x1="140" y1="180" x2="140" y2="210" stroke="#999" stroke-width="1" stroke-dasharray="3,3"/>
+  <text x="60" y="350" font-size="18" fill="#999">← 点颜色 → 文字高亮</text>
+  <text x="60" y="375" font-size="18" fill="#999">← 点高亮 → 编辑/删除</text>
+</svg>

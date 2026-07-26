@@ -1,0 +1,59 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 400" font-family="-apple-system, BlinkMacSystemFont, sans-serif">
+  <defs>
+    <filter id="shadow">
+      <feDropShadow dx="0" dy="2" stdDeviation="4" flood-opacity="0.1"/>
+    </filter>
+  </defs>
+
+  <!-- Background -->
+  <rect width="800" height="400" fill="#f5f5f7" rx="12"/>
+
+  <!-- Left: Terminal CLI -->
+  <rect x="30" y="20" width="360" height="360" fill="#1e1e2e" rx="8" filter="url(#shadow)"/>
+  <rect x="40" y="32" width="6" height="6" rx="3" fill="#ff5f57"/>
+  <rect x="52" y="32" width="6" height="6" rx="3" fill="#ffbd2e"/>
+  <rect x="64" y="32" width="6" height="6" rx="3" fill="#28c840"/>
+
+  <text x="40" y="70" font-size="12" font-family="monospace" fill="#c0caf5">$ hl "attention mechanism transforms seq2seq"</text>
+  <text x="40" y="92" font-size="12" font-family="monospace" fill="#a6e3a1">✓ Saved yellow highlight (42 chars)</text>
+  <text x="40" y="108" font-size="12" font-family="monospace" fill="#6c7086">  📄 ~/Highlights/2026/07/2026-07-26-*.md</text>
+  <text x="40" y="130" font-size="12" font-family="monospace" fill="#c0caf5">$ hl -c green -m "OpenAI推理模型" \</text>
+  <text x="40" y="146" font-size="12" font-family="monospace" fill="#c0caf5">    "o3 model uses CoT reasoning"</text>
+  <text x="40" y="168" font-size="12" font-family="monospace" fill="#a6e3a1">✓ Saved green highlight (24 chars)</text>
+  <text x="40" y="190" font-size="12" font-family="monospace" fill="#c0caf5">$ hl search transformer</text>
+  <text x="40" y="212" font-size="12" font-family="monospace" fill="#c0caf5">🔍 Searching for: transformer</text>
+  <text x="40" y="234" font-size="12" font-family="monospace" fill="#c0caf5">  [1] 🟡 2026-07-26  transformer ...</text>
+  <text x="40" y="250" font-size="12" font-family="monospace" fill="#c0caf5">      💬 面试重点：Transformer核心机制</text>
+  <text x="40" y="272" font-size="12" font-family="monospace" fill="#c0caf5">$ hl stats</text>
+
+  <rect x="40" y="294" width="330" height="18" fill="#2a2a3e" rx="3"/>
+  <text x="44" y="308" font-size="11" font-family="monospace" fill="#c0caf5">📊  5 highlights · 7 colors · 16 tags</text>
+  <text x="44" y="326" font-size="11" font-family="monospace" fill="#c0caf5">    🟡 yellow: ████ (1)  🟢 green: ████ (1)</text>
+  <text x="44" y="342" font-size="11" font-family="monospace" fill="#c0caf5">    🔵 blue:  ████ (1)  🔴 red:   ████ (1)</text>
+
+  <!-- Right: Spotlight -->
+  <rect x="420" y="20" width="350" height="360" fill="white" rx="8" filter="url(#shadow)"/>
+
+  <rect x="420" y="20" width="350" height="100" fill="#e8f0fe" rx="8"/>
+  <rect x="420" y="100" width="350" height="20" fill="#e8f0fe"/>
+  <text x="480" y="68" font-size="20" font-weight="bold" fill="#333">Spotlight</text>
+  <rect x="470" y="80" width="200" height="22" fill="white" rx="4" stroke="#ccc" stroke-width="1"/>
+  <text x="480" y="95" font-size="12" fill="#999">🔍 transformer</text>
+
+  <!-- Spotlight results -->
+  <text x="440" y="140" font-size="11" fill="#666" font-weight="bold">BEST MATCH</text>
+  <rect x="440" y="152" width="310" height="60" fill="#f5f5f7" rx="6"/>
+  <text x="450" y="172" font-size="12" fill="#333" font-weight="bold">📌 Highlights Everywhere</text>
+  <text x="450" y="190" font-size="11" fill="#666">Transformer 架构的核心是 self-attention</text>
+  <text x="450" y="204" font-size="10" fill="#999">~/Highlights/2026/07/2026-07-26-*.md</text>
+
+  <text x="440" y="235" font-size="11" fill="#666" font-weight="bold">DOCUMENTS</text>
+  <rect x="440" y="247" width="310" height="50" fill="white" rx="6" stroke="#eee" stroke-width="1"/>
+  <text x="450" y="265" font-size="12" fill="#333">o3 模型在推理任务上表现出色</text>
+  <text x="450" y="285" font-size="10" fill="#999">~/Highlights/2026/07/2026-07-26-*.md</text>
+
+  <rect x="440" y="305" width="310" height="50" fill="white" rx="6" stroke="#eee" stroke-width="1"/>
+  <text x="450" y="323" font-size="12" fill="#333">DeepSeek-V3 采用了 MoE 架构</text>
+  <text x="450" y="343" font-size="10" fill="#999">~/Highlights/2026/07/2026-07-26-*.md</text>
+
+</svg>

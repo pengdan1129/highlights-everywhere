@@ -4,15 +4,15 @@
 > **选中即高亮，随手记笔记，Spotlight 一键搜到。**
 
 <p align="center">
-  <img src="images/demo-toolbar.png" alt="Highlights Everywhere Demo" width="700">
+  <img src="images/demo-overview.svg" alt="Highlights Everywhere Demo" width="750">
 </p>
 
 <p align="center">
-  <em>Select text → pick a color → add a note → search with Cmd+Space</em>
+  <em>选中文字 → 点颜色 → 写备注 → 点高亮可编辑/删除 → Cmd+Space 搜到</em>
 </p>
 
 <p align="center">
-  <img src="images/demo-spotlight.png" alt="Spotlight Search" width="700">
+  <img src="images/demo-cli.svg" alt="CLI and Spotlight Search" width="750">
 </p>
 
 ---
