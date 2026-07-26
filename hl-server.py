@@ -688,12 +688,6 @@ class HighlightHandler(http.server.SimpleHTTPRequestHandler):
         // Color button: immediately highlight
         div.querySelectorAll('.hc').forEach(function(b) {
             b.addEventListener('click', function() {
-                // Restore text selection visually before highlighting
-                try {
-                    var sel = window.getSelection();
-                    sel.removeAllRanges();
-                    sel.addRange(range);
-                } catch(e) {}
                 var col = this.dataset.c;
                 // If already highlighted with a color, update it
                 if (savedSpan) {
@@ -788,10 +782,6 @@ class HighlightHandler(http.server.SimpleHTTPRequestHandler):
         div.style.display = 'block';
         toolbar = div;
         var inp = div.querySelector('.hn');
-        // Restore text selection highlight - must be AFTER toolbar creation AND no focus stealing
-        requestAnimationFrame(function() {
-            try { var sel = window.getSelection(); sel.removeAllRanges(); sel.addRange(range); } catch(e) {}
-        });
     }
 
     function hideToolbar() { if (toolbar) { toolbar.remove(); toolbar=null; } }

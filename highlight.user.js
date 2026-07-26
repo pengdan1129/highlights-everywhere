@@ -93,6 +93,29 @@
 
     function showToolbar(range, text) {
         hideToolbar();
+        // Wrap selected text in a temporary transparent-blue span to replace native selection
+        var tempSpan = null;
+        try {
+            var c = range.cloneContents();
+            if (c.textContent.trim() === text) {
+                tempSpan = document.createElement('hl-temp');
+                tempSpan.style.cssText = 'background:rgba(59,130,246,0.2);border-radius:2px;padding:0 2px;';
+                range.surroundContents(tempSpan);
+            }
+        } catch(e) {}
+        // If surroundContents failed, range might be invalid; get current selection
+        if (!tempSpan) {
+            try {
+                var sel2 = window.getSelection();
+                if (sel2 && !sel2.isCollapsed) {
+                    range = sel2.getRangeAt(0);
+                    tempSpan = document.createElement('hl-temp');
+                    tempSpan.style.cssText = 'background:rgba(59,130,246,0.2);border-radius:2px;padding:0 2px;';
+                    range.surroundContents(tempSpan);
+                }
+            } catch(e2) {}
+        }
+
         var div = document.createElement('hl-toolbar');
         div.style.cssText = 'position:fixed;z-index:2147483647;font-family:sans-serif;font-size:13px;';
 
@@ -116,12 +139,6 @@
         // Color button: immediately highlight
         div.querySelectorAll('.hc').forEach(function(b) {
             b.addEventListener('click', function() {
-                // Restore text selection visually before highlighting
-                try {
-                    var sel = window.getSelection();
-                    sel.removeAllRanges();
-                    sel.addRange(range);
-                } catch(e) {}
                 var col = this.dataset.c;
                 // If already highlighted with a color, update it
                 if (savedSpan) {
@@ -216,10 +233,6 @@
         div.style.display = 'block';
         toolbar = div;
         var inp = div.querySelector('.hn');
-        // Restore text selection highlight - must be AFTER toolbar creation AND no focus stealing
-        requestAnimationFrame(function() {
-            try { var sel = window.getSelection(); sel.removeAllRanges(); sel.addRange(range); } catch(e) {}
-        });
     }
 
     function hideToolbar() { if (toolbar) { toolbar.remove(); toolbar=null; } }
