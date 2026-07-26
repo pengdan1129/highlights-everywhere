@@ -1,0 +1,32 @@
+{
+  "manifest_version": 3,
+  "name": "Highlights Everywhere",
+  "version": "1.0.0",
+  "description": "Web page annotations",
+  "permissions": [
+    "storage"
+  ],
+  "content_scripts": [
+    {
+      "matches": [
+        "http://*/*",
+        "https://*/*",
+        "file:///*"
+      ],
+      "js": [
+        "content.js"
+      ],
+      "css": [
+        "highlight.css"
+      ],
+      "run_at": "document_end"
+    }
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "Highlights Everywhere"
+  }
+}

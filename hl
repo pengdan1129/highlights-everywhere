@@ -1,0 +1,851 @@
+#!/usr/bin/env python3
+"""
+hl - Highlights Everywhere v2
+A universal text highlight collector for macOS with color + comments + web UI.
+
+Usage:
+  hl [options] "text..."      Save highlighted text
+  hl [options]                 Same, reads from clipboard if no args/stdin
+  hl -c yellow "text..."       Save with color (yellow/green/blue/red/purple/orange/pink)
+  hl -m "my note" "text..."    Save with comment/annotation
+  hl -t "tag1,tag2" "text..."  Save with tags
+  hl --url "https://..."       Save with source URL
+
+  hl server                    Start the web UI (http://localhost:8899)
+  hl search <query>            Search highlights via Spotlight
+  hl list [N]                  List last N highlights (default 10)
+  hl today                     Show today's highlights
+  hl stats                     Show statistics
+  hl open                      Open highlights directory in Finder
+  hl -h / --help               Show this help
+
+Colors: yellow, green, blue, red, purple, orange, pink
+"""
+
+import sys
+import os
+import re
+import json
+import subprocess
+import datetime
+import webbrowser
+import http.server
+import socketserver
+import urllib.parse
+from pathlib import Path
+from collections import Counter
+
+HIGHLIGHTS_DIR = Path.home() / "Highlights"
+TAGS_DIR = HIGHLIGHTS_DIR / ".tags"
+WEB_PORT = 8899
+
+VALID_COLORS = {
+    'yellow': '#FFF176',
+    'green': '#A5D6A7',
+    'blue': '#90CAF9',
+    'red': '#EF9A9A',
+    'purple': '#CE93D8',
+    'orange': '#FFCC80',
+    'pink': '#F48FB1',
+}
+
+def ensure_dirs():
+    today = datetime.date.today()
+    dir_path = HIGHLIGHTS_DIR / str(today.year) / f"{today.month:02d}"
+    dir_path.mkdir(parents=True, exist_ok=True)
+    TAGS_DIR.mkdir(parents=True, exist_ok=True)
+    return dir_path
+
+
+def get_frontmost_app():
+    try:
+        result = subprocess.run(
+            ['osascript', '-e',
+             'tell application "System Events" to get name of first application process whose frontmost is true'],
+            capture_output=True, text=True, timeout=5
+        )
+        return result.stdout.strip() if result.returncode == 0 else "Unknown"
+    except Exception:
+        return "Unknown"
+
+
+def get_clipboard():
+    try:
+        result = subprocess.run(['pbpaste'], capture_output=True, text=True, timeout=5)
+        return result.stdout.strip() if result.returncode == 0 else ""
+    except Exception:
+        return ""
+
+
+def notify(title, text):
+    try:
+        safe_title = title.replace('\\', '\\\\').replace('"', '\\"')
+        safe_text = text.replace('\\', '\\\\').replace('"', '\\"')
+        subprocess.run([
+            'osascript', '-e',
+            f'display notification "{safe_text}" with title "{safe_title}"'
+        ], capture_output=True, timeout=5)
+    except Exception:
+        pass
+
+
+def sanitize_filename(text, max_len=50):
+    text = text.strip().strip('"\'〈《（')
+    text = re.sub(r'[\\/:*?"<>|]', ' ', text)
+    text = re.sub(r'\s+', ' ', text)
+    if len(text) > max_len:
+        text = text[:max_len].rsplit(' ', 1)[0] if ' ' in text[:max_len] else text[:max_len]
+    return text.strip() or "untitled"
+
+
+def hex_to_rgba(hex_color, alpha=0.3):
+    """Convert hex color to rgba string."""
+    h = hex_color.lstrip('#')
+    r, g, b = int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16)
+    return f"rgba({r},{g},{b},{alpha})"
+
+
+def save_highlight(text, tags=None, color=None, comment=None, source_url=None):
+    if not text or not text.strip():
+        return None, "Nothing to save - no text provided"
+
+    text = text.strip()
+    tags = tags or []
+    color = color or 'yellow'
+    if color not in VALID_COLORS:
+        print(f"Warning: '{color}' not valid, using yellow. Valid: {', '.join(VALID_COLORS.keys())}", file=sys.stderr)
+        color = 'yellow'
+
+    ts = datetime.datetime.now()
+    timestamp_str = ts.strftime("%Y-%m-%d %H:%M:%S")
+    date_str = ts.strftime("%Y-%m-%d")
+    time_str = ts.strftime("%H:%M:%S")
+
+    dir_path = HIGHLIGHTS_DIR / str(ts.year) / f"{ts.month:02d}"
+    dir_path.mkdir(parents=True, exist_ok=True)
+
+    ts_file = ts.strftime("%Y-%m-%d-%H%M%S")
+    app_name = get_frontmost_app()
+
+    preview = sanitize_filename(text, 40)
+    tag_suffix = f"-{'-'.join(tags)}" if tags else ""
+    filename = f"{ts_file}{tag_suffix}-{preview}.md"
+    filepath = dir_path / filename
+
+    hex_color = VALID_COLORS[color]
+    comment_section = f"\n📝 **注释**: {comment}\n" if comment else ""
+    url_section = f"\n🔗 **来源**: [{source_url}]({source_url})\n" if source_url else ""
+    tag_line = f"\nTags: {', '.join(tags)}" if tags else ""
+
+    content = f"""---
+date: {date_str}
+time: {time_str}
+timestamp: {timestamp_str}
+source_app: {app_name}
+source_url: "{source_url or ''}"
+color: {color}
+hex_color: {hex_color}
+tags: [{', '.join(tags)}]
+comment: "{comment or ''}"
+---
+
+## <span style="background-color:{hex_color};padding:2px 6px;border-radius:3px">📌 Highlight</span>
+
+> {text}
+{comment_section}{url_section}
+---
+*Saved from **{app_name}** at {time_str}*{tag_line}
+"""
+
+    filepath.write_text(content.strip() + "\n")
+
+    # Save tag index
+    TAGS_DIR.mkdir(parents=True, exist_ok=True)
+    for tag in tags:
+        tag_file = TAGS_DIR / f"{tag}.txt"
+        with open(tag_file, 'a') as f:
+            f.write(f"{ts_file} {text[:80]}\n")
+
+    return filepath, f"✓ Saved {color} highlight ({len(text)} chars) from {app_name}"
+
+
+def parse_highlight_file(fp):
+    """Parse a highlight markdown file into a dict."""
+    try:
+        content = fp.read_text(encoding='utf-8')
+    except Exception:
+        return None
+
+    result = {
+        'path': str(fp),
+        'filename': fp.name,
+        'mtime': datetime.datetime.fromtimestamp(fp.stat().st_mtime).strftime("%Y-%m-%d %H:%M"),
+    }
+
+    # Parse YAML frontmatter
+    fm_match = re.match(r'^---\s*\n(.*?)\n---\s*\n(.*)', content, re.DOTALL)
+    if fm_match:
+        fm_text = fm_match.group(1)
+        body = fm_match.group(2)
+        # Parse key: value pairs
+        for line in fm_text.split('\n'):
+            m = re.match(r'^(\w+):\s*(.*)', line)
+            if m:
+                key = m.group(1)
+                val = m.group(2).strip().strip('"\'')
+                result[key] = val
+
+        # Extract the quote (highlighted text) - find blockquote line
+        qm = re.search(r'(?:\n|^)> (.+?)(?:\n|$)', body)
+        if qm:
+            result['quote'] = qm.group(1).strip()
+
+        # Extract comment
+        cm = re.search(r'📝\s*\*\*(?:注释|Note)\*\*:\s*(.+?)(?:\n|$)', body)
+        if cm:
+            result['comment'] = cm.group(1).strip()
+
+        # Extract URL
+        um = re.search(r'🔗\s*\*\*(?:来源|Source)\*\*:\s*\[(.+?)\]\((.+?)\)', body)
+        if um:
+            result['source_url'] = um.group(2)
+
+    # Defaults
+    result.setdefault('color', 'yellow')
+    result.setdefault('hex_color', VALID_COLORS.get(result['color'], '#FFF176'))
+    result.setdefault('quote', fp.stem[:80])
+    result.setdefault('source_app', 'Unknown')
+    result.setdefault('tags', '[]')
+    result.setdefault('comment', '')
+    result.setdefault('source_url', '')
+
+    return result
+
+
+def get_all_highlights(limit=100):
+    """Get all highlights sorted by time (newest first)."""
+    files = sorted(
+        HIGHLIGHTS_DIR.rglob('*.md'),
+        key=lambda p: p.stat().st_mtime,
+        reverse=True
+    )
+    results = []
+    for fp in files[:limit]:
+        h = parse_highlight_file(fp)
+        if h:
+            results.append(h)
+    return results
+
+
+def search_highlights(query):
+    results = []
+    if not query:
+        return results
+    try:
+        cmd = ['mdfind', '-onlyin', str(HIGHLIGHTS_DIR), query]
+        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+        if proc.returncode == 0:
+            for f in proc.stdout.strip().split('\n'):
+                if not f:
+                    continue
+                fp = Path(f)
+                if fp.exists():
+                    h = parse_highlight_file(fp)
+                    if h:
+                        results.append(h)
+    except Exception:
+        pass
+    return results
+
+
+def list_highlights(n=10):
+    files = sorted(
+        HIGHLIGHTS_DIR.rglob('*.md'),
+        key=lambda p: p.stat().st_mtime,
+        reverse=True
+    )
+    results = []
+    for fp in files[:n]:
+        h = parse_highlight_file(fp)
+        if h:
+            results.append(h)
+    return results
+
+
+def print_results(results, label="Results"):
+    if not results:
+        print("No results found.")
+        return
+
+    print(f"\n{label}:\n")
+    for i, r in enumerate(results, 1):
+        color_dot = "●"
+        c = r.get('color', 'yellow')
+        quote = r.get('quote', '')[:70]
+        comment = r.get('comment', '')
+        app = r.get('source_app', '')
+        mtime = r.get('mtime', '')
+        print(f"  [{i}] {color_dot} {mtime}  [{c}] {quote}")
+        if comment:
+            print(f"       💬 {comment[:60]}")
+        print(f"       📄 {r['path']}")
+        print()
+
+
+def print_stats():
+    files = list(HIGHLIGHTS_DIR.rglob('*.md'))
+    tags = list(TAGS_DIR.glob('*.txt'))
+
+    months = Counter()
+    colors = Counter()
+    for fp in files:
+        ts = fp.stat().st_mtime
+        dt = datetime.datetime.fromtimestamp(ts)
+        months[f"{dt.year}-{dt.month:02d}"] += 1
+        h = parse_highlight_file(fp)
+        if h:
+            colors[h.get('color', 'yellow')] += 1
+
+    print(f"\n📊 Highlights Statistics")
+    print(f"{'='*50}")
+    print(f"  Total highlights: {len(files)}")
+    print(f"  Total tags:       {len(tags)}")
+    print()
+    if colors:
+        print("  By color:")
+        for col, count in sorted(colors.items(), key=lambda x: -x[1]):
+            dot = "🟡🟢🔴🔵🟣🟠🟤".split("🟡🟢🔴🔵🟣🟠🟤")
+            idx = list(VALID_COLORS.keys()).index(col) if col in VALID_COLORS else 0
+            emoji = ["🟡","🟢","🔵","🔴","🟣","🟠","🟥"][idx] if idx < 7 else "🟡"
+            bar = "█" * min(count, 20)
+            print(f"    {emoji} {col}: {bar} ({count})")
+    print()
+    if months:
+        print("  By month:")
+        for month, count in sorted(months.items(), reverse=True)[:12]:
+            bar = "█" * min(count, 30)
+            print(f"    {month}: {bar} ({count})")
+
+
+# ─── Web UI Server ──────────────────────────────────────────────────────
+
+WEB_HTML = r"""<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Highlights Everywhere</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    background: #f5f5f7;
+    color: #1d1d1f;
+    min-height: 100vh;
+}
+
+.header {
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    color: white;
+    padding: 40px 20px;
+    text-align: center;
+}
+.header h1 { font-size: 32px; font-weight: 700; margin-bottom: 8px; }
+.header p { opacity: 0.85; font-size: 16px; }
+.header .stats { margin-top: 12px; font-size: 14px; opacity: 0.75; }
+
+.toolbar {
+    display: flex;
+    gap: 12px;
+    padding: 16px 24px;
+    background: white;
+    border-bottom: 1px solid #e5e5e7;
+    flex-wrap: wrap;
+    align-items: center;
+    position: sticky;
+    top: 0;
+    z-index: 10;
+    backdrop-filter: blur(10px);
+}
+.toolbar input[type="text"] {
+    flex: 1;
+    min-width: 200px;
+    padding: 10px 14px;
+    border: 1px solid #d2d2d7;
+    border-radius: 8px;
+    font-size: 14px;
+    outline: none;
+    transition: border-color 0.2s;
+}
+.toolbar input[type="text"]:focus {
+    border-color: #667eea;
+    box-shadow: 0 0 0 3px rgba(102,126,234,0.15);
+}
+.toolbar select, .toolbar button {
+    padding: 10px 14px;
+    border: 1px solid #d2d2d7;
+    border-radius: 8px;
+    font-size: 14px;
+    background: white;
+    cursor: pointer;
+}
+.toolbar button {
+    background: #667eea;
+    color: white;
+    border: none;
+    font-weight: 600;
+    transition: background 0.2s;
+}
+.toolbar button:hover { background: #5a6fd6; }
+
+.grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(380px, 1fr));
+    gap: 16px;
+    padding: 24px;
+    max-width: 1400px;
+    margin: 0 auto;
+}
+
+.card {
+    background: white;
+    border-radius: 12px;
+    overflow: hidden;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.06);
+    transition: transform 0.2s, box-shadow 0.2s;
+    border-left: 4px solid #ccc;
+}
+.card:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 8px 24px rgba(0,0,0,0.1);
+}
+
+.card-body {
+    padding: 16px 20px;
+}
+
+.card .meta {
+    font-size: 12px;
+    color: #86868b;
+    margin-bottom: 8px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.card .color-badge {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 4px;
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+}
+
+.card .quote {
+    font-size: 15px;
+    line-height: 1.6;
+    padding: 12px 16px;
+    border-radius: 8px;
+    margin: 8px 0;
+    position: relative;
+    font-style: italic;
+}
+.card .quote::before {
+    content: '"';
+    font-size: 28px;
+    position: absolute;
+    left: 6px;
+    top: 4px;
+    opacity: 0.4;
+    font-style: normal;
+}
+
+.card .comment {
+    background: #f8f8fa;
+    padding: 10px 14px;
+    border-radius: 8px;
+    margin-top: 10px;
+    font-size: 14px;
+    border-left: 3px solid #667eea;
+}
+.card .comment .label {
+    font-weight: 600;
+    font-size: 12px;
+    color: #667eea;
+    text-transform: uppercase;
+    display: block;
+    margin-bottom: 4px;
+}
+
+.card .footer {
+    padding: 10px 20px;
+    background: #fafafa;
+    border-top: 1px solid #f0f0f0;
+    font-size: 12px;
+    color: #86868b;
+    display: flex;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 4px;
+}
+.card .footer a {
+    color: #667eea;
+    text-decoration: none;
+}
+.card .footer a:hover {
+    text-decoration: underline;
+}
+
+.tag {
+    display: inline-block;
+    background: #f0f0f5;
+    padding: 2px 8px;
+    border-radius: 4px;
+    font-size: 11px;
+    margin: 2px;
+    color: #515154;
+}
+.tag.blue { background: #e8f0fe; color: #1967d2; }
+.tag.green { background: #e6f4ea; color: #137333; }
+.tag.purple { background: #f3e8fd; color: #9334e6; }
+.tag.orange { background: #fef7e0; color: #b45f06; }
+
+.empty-state {
+    text-align: center;
+    padding: 80px 20px;
+    color: #86868b;
+}
+.empty-state h2 { font-size: 24px; margin-bottom: 8px; }
+.empty-state p { font-size: 16px; }
+
+@media (max-width: 600px) {
+    .grid { grid-template-columns: 1fr; padding: 12px; }
+    .toolbar { padding: 12px; }
+}
+</style>
+</head>
+<body>
+
+<div class="header">
+    <h1>📌 Highlights Everywhere</h1>
+    <p>Save, color, annotate, and search your highlights</p>
+    <div class="stats" id="header-stats"></div>
+</div>
+
+<div class="toolbar">
+    <input type="text" id="search-input" placeholder="🔍 搜索高亮内容..." oninput="filterCards()">
+    <select id="color-filter" onchange="filterCards()">
+        <option value="">全部颜色</option>
+        <option value="yellow">🟡 黄色</option>
+        <option value="green">🟢 绿色</option>
+        <option value="blue">🔵 蓝色</option>
+        <option value="red">🔴 红色</option>
+        <option value="purple">🟣 紫色</option>
+        <option value="orange">🟠 橙色</option>
+        <option value="pink">🩷 粉色</option>
+    </select>
+    <button onclick="document.getElementById('search-input').value='';document.getElementById('color-filter').value='';filterCards()">✕ 重置</button>
+</div>
+
+<div class="grid" id="card-grid"></div>
+
+<script>
+const COLORS = {
+    yellow: {bg: '#FFF9C4', border: '#FDD835', badge: '#F9A825', text: '#5D4037'},
+    green:  {bg: '#C8E6C9', border: '#66BB6A', badge: '#388E3C', text: '#1B5E20'},
+    blue:   {bg: '#BBDEFB', border: '#42A5F5', badge: '#1565C0', text: '#0D47A1'},
+    red:    {bg: '#FFCDD2', border: '#EF5350', badge: '#D32F2F', text: '#B71C1C'},
+    purple: {bg: '#E1BEE7', border: '#AB47BC', badge: '#7B1FA2', text: '#4A148C'},
+    orange: {bg: '#FFE0B2', border: '#FF9800', badge: '#E65100', text: '#BF360C'},
+    pink:   {bg: '#F8BBD0', border: '#EC407A', badge: '#C2185B', text: '#880E4F'},
+};
+
+let allHighlights = [];
+
+async function load() {
+    try {
+        const res = await fetch('/api/highlights');
+        const data = await res.json();
+        allHighlights = data.highlights || [];
+        document.getElementById('header-stats').textContent =
+            `共 ${allHighlights.length} 条高亮 · 最近更新: ${data.latest}`;
+        render(allHighlights);
+    } catch(e) {
+        document.getElementById('card-grid').innerHTML =
+            `<div class="empty-state"><h2>❌ 加载失败</h2><p>${e.message}</p></div>`;
+    }
+}
+
+function render(items) {
+    const grid = document.getElementById('card-grid');
+    if (!items.length) {
+        grid.innerHTML = `<div class="empty-state"><h2>📭 没有找到高亮</h2><p>试试: hl -c yellow "你的文字"</p></div>`;
+        return;
+    }
+
+    grid.innerHTML = items.map(h => {
+        const c = h.color || 'yellow';
+        const style = COLORS[c] || COLORS.yellow;
+        const tags = parseTags(h.tags);
+        const time = h.mtime || '';
+        const app = h.source_app || '';
+        const url = h.source_url || '';
+        const comment = h.comment || '';
+
+        return `<div class="card" style="border-left-color:${style.border}">
+            <div class="card-body">
+                <div class="meta">
+                    <span>${time}</span>
+                    <span class="color-badge" style="background:${style.badge};color:white">${c}</span>
+                </div>
+                <div class="quote" style="background:${style.bg};color:${style.text}">
+                    ${escapeHtml(h.quote || '')}
+                </div>
+                ${comment ? `<div class="comment"><span class="label">💬 注释</span>${escapeHtml(comment)}</div>` : ''}
+                ${tags ? `<div style="margin-top:8px">${tags}</div>` : ''}
+            </div>
+            <div class="footer">
+                <span>📱 ${escapeHtml(app)}</span>
+                ${url ? `<a href="${escapeHtml(url)}" target="_blank">🔗 查看原文</a>` : ''}
+            </div>
+        </div>`;
+    }).join('');
+}
+
+function parseTags(tagsStr) {
+    if (!tagsStr) return '';
+    try {
+        const arr = JSON.parse(tagsStr);
+        if (!arr.length) return '';
+        return arr.map(t => {
+            const cls = ['blue','green','purple','orange'][Math.abs(hash(t)) % 4];
+            return `<span class="tag ${cls}">${escapeHtml(t)}</span>`;
+        }).join('');
+    } catch(e) {
+        return '';
+    }
+}
+
+function hash(s) {
+    let h = 0;
+    for (let i = 0; i < s.length; i++) {
+        h = ((h << 5) - h) + s.charCodeAt(i);
+        h |= 0;
+    }
+    return h;
+}
+
+function escapeHtml(s) {
+    if (!s) return '';
+    const d = document.createElement('div');
+    d.textContent = s;
+    return d.innerHTML;
+}
+
+function filterCards() {
+    const q = document.getElementById('search-input').value.toLowerCase();
+    const cf = document.getElementById('color-filter').value;
+
+    const filtered = allHighlights.filter(h => {
+        if (cf && h.color !== cf) return false;
+        if (q) {
+            const text = ((h.quote || '') + ' ' + (h.comment || '') + ' ' + (h.tags || '') + ' ' + (h.source_app || '')).toLowerCase();
+            return text.includes(q);
+        }
+        return true;
+    });
+    render(filtered);
+}
+
+load();
+</script>
+</body>
+</html>"""
+
+
+def start_server():
+    """Start the web UI server."""
+    import threading
+
+    highlights_json_path = HIGHLIGHTS_DIR / ".cache" / "highlights.json"
+
+    class HighlightHandler(http.server.SimpleHTTPRequestHandler):
+        def do_GET(self):
+            parsed = urllib.parse.urlparse(self.path)
+
+            if parsed.path == '/':
+                self.send_response(200)
+                self.send_header('Content-Type', 'text/html; charset=utf-8')
+                self.end_headers()
+                self.wfile.write(WEB_HTML.encode('utf-8'))
+
+            elif parsed.path == '/api/highlights':
+                self.send_response(200)
+                self.send_header('Content-Type', 'application/json; charset=utf-8')
+                self.send_header('Access-Control-Allow-Origin', '*')
+                self.end_headers()
+                highlights = get_all_highlights(limit=500)
+                latest = highlights[0]['mtime'] if highlights else 'N/A'
+                data = json.dumps({
+                    'highlights': highlights,
+                    'total': len(highlights),
+                    'latest': latest,
+                    'colors': list(VALID_COLORS.keys()),
+                }, ensure_ascii=False)
+                self.wfile.write(data.encode('utf-8'))
+
+            else:
+                self.send_response(404)
+                self.end_headers()
+                self.wfile.write(b'Not found')
+
+        def log_message(self, format, *args):
+            pass  # Suppress logs
+
+    # Find a free port
+    port = WEB_PORT
+    for attempt in range(10):
+        try:
+            server = socketserver.TCPServer(("", port), HighlightHandler)
+            break
+        except OSError:
+            port += 1
+    else:
+        print("❌ Could not find a free port")
+        return
+
+    print(f"\n🌐 Highlights Web UI: http://localhost:{port}")
+    print(f"   📁 Data from: {HIGHLIGHTS_DIR}")
+    print(f"   Press Ctrl+C to stop\n")
+
+    # Open browser
+    webbrowser.open(f'http://localhost:{port}')
+
+    try:
+        server.serve_forever()
+    except KeyboardInterrupt:
+        print("\n👋 Server stopped.")
+        server.shutdown()
+
+
+# ─── CLI ────────────────────────────────────────────────────────────────
+
+def cmd_save(args, tags=None, color=None, comment=None, source_url=None):
+    text = None
+
+    if args:
+        text = ' '.join(args)
+
+    if not text and not sys.stdin.isatty():
+        try:
+            text = sys.stdin.read().strip()
+        except Exception:
+            pass
+
+    if not text:
+        text = get_clipboard()
+
+    if not text:
+        print("No text provided. Options:")
+        print("  hl -c yellow -m \"note\" \"text\"")
+        print("  echo \"text\" | hl")
+        print("  hl   (reads clipboard)")
+        return
+
+    filepath, msg = save_highlight(text, tags, color, comment, source_url)
+    if filepath:
+        color_dot = "●"
+        print(f"\n✅ {msg}")
+        print(f"   📄 {filepath}")
+        notify("Highlight Saved", f"{color} • {len(text)} chars")
+    else:
+        print(f"\n❌ {msg}")
+
+
+def parse_args():
+    tags = []
+    color = None
+    comment = None
+    source_url = None
+    args = sys.argv[1:]
+    cmd = None
+    positional = []
+    i = 0
+    while i < len(args):
+        if args[i] in ('-h', '--help'):
+            print(__doc__)
+            sys.exit(0)
+        elif args[i] == '-t' and i + 1 < len(args):
+            tags = [t.strip() for t in args[i+1].split(',')]
+            i += 2
+        elif args[i] in ('-c', '--color') and i + 1 < len(args):
+            color = args[i+1].lower()
+            i += 2
+        elif args[i] in ('-m', '--comment') and i + 1 < len(args):
+            comment = args[i+1]
+            i += 2
+        elif args[i] == '--url' and i + 1 < len(args):
+            source_url = args[i+1]
+            i += 2
+        elif cmd is None and args[i] in ('save', 'search', 'list', 'today', 'stats', 'open', 'help', 'server'):
+            cmd = args[i]
+            i += 1
+        else:
+            positional.append(args[i])
+            i += 1
+    return cmd or 'save', tags, color, comment, source_url, positional
+
+
+def main():
+    if len(sys.argv) < 2 or sys.argv[1] in ('-h', '--help'):
+        print(__doc__)
+        return
+
+    cmd, tags, color, comment, source_url, positional = parse_args()
+
+    if cmd == 'save':
+        cmd_save(positional, tags, color, comment, source_url)
+
+    elif cmd == 'server':
+        server_script = Path.home() / "scripts" / "hl-server.py"
+        os.execv(sys.executable, [sys.executable, str(server_script)])
+
+    elif cmd == 'search':
+        query = ' '.join(positional) if positional else None
+        if not query:
+            query = input("Search query: ").strip()
+        if query:
+            print(f"\n🔍 Searching for: {query}\n")
+            results = search_highlights(query)
+            print_results(results, f"Search results for '{query}'")
+        else:
+            print("No search query provided.")
+
+    elif cmd == 'list':
+        n = int(positional[0]) if positional and positional[0].isdigit() else 10
+        results = list_highlights(n)
+        print_results(results, f"Recent highlights (last {n})")
+
+    elif cmd == 'today':
+        today = datetime.date.today().strftime("%Y-%m-%d")
+        results = [
+            h for h in get_all_highlights(limit=500)
+            if today in h.get('mtime', '') or today in h.get('date', '')
+        ]
+        print_results(results, f"Today's highlights ({len(results)})")
+
+    elif cmd == 'stats':
+        print_stats()
+
+    elif cmd == 'open':
+        subprocess.run(['open', str(HIGHLIGHTS_DIR)])
+
+    elif cmd == 'help':
+        print(__doc__)
+
+
+if __name__ == '__main__':
+    main()

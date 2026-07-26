@@ -1,0 +1,21 @@
+/* Highlights Everywhere - Styles */
+
+hl-span {
+  transition: background-color 0.2s;
+}
+hl-span:hover {
+  filter: brightness(0.95);
+}
+
+hl-toolbar {
+  animation: hl-fade-in 0.15s ease-out;
+}
+
+hl-tooltip {
+  animation: hl-fade-in 0.15s ease-out;
+}
+
+@keyframes hl-fade-in {
+  from { opacity: 0; transform: translateY(-4px); }
+  to { opacity: 1; transform: translateY(0); }
+}

@@ -1,0 +1,103 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<style>
+body { width: 320px; padding: 16px; font-family: -apple-system, sans-serif; margin: 0; }
+h2 { font-size: 16px; margin: 0 0 8px; color: #333; }
+.status { font-size: 13px; padding: 8px 12px; border-radius: 6px; margin-bottom: 12px; }
+.connected { background: #e6f4ea; color: #137333; }
+.disconnected { background: #fce8e6; color: #c5221f; }
+.hl-item { 
+  padding: 8px 0; border-bottom: 1px solid #f0f0f0; font-size: 13px;
+  display: flex; align-items: flex-start; gap: 8px;
+}
+.hl-dot { width: 12px; height: 12px; border-radius: 50%; flex-shrink: 0; margin-top: 3px; }
+.hl-text { flex: 1; line-height: 1.4; }
+.hl-text .note { font-size: 11px; color: #666; margin-top: 2px; }
+.hl-time { font-size: 11px; color: #999; }
+.empty { text-align: center; padding: 20px; color: #999; font-size: 13px; }
+.btn {
+  display: block; width: 100%; padding: 10px; border: none; border-radius: 6px;
+  font-size: 13px; cursor: pointer; margin-top: 8px; font-weight: 600;
+}
+.btn-primary { background: #667eea; color: white; }
+.btn-primary:hover { background: #5a6fd6; }
+.btn-secondary { background: #f0f0f5; color: #333; }
+.btn-secondary:hover { background: #e5e5ea; }
+</style>
+</head>
+<body>
+  <h2>📌 Highlights Everywhere</h2>
+  <div id="status" class="status disconnected">⏳ 连接中...</div>
+  <div id="content">
+    <div class="empty">加载中...</div>
+  </div>
+  <button id="open-webui" class="btn btn-primary">🌐 打开网页展示</button>
+  <button id="refresh" class="btn btn-secondary">🔄 刷新</button>
+
+<script>
+const COLORS = {
+  yellow:'#FFF176', green:'#A5D6A7', blue:'#90CAF9', red:'#EF9A9A',
+  purple:'#CE93D8', orange:'#FFCC80', pink:'#F48FB1'
+};
+
+async function load() {
+  // Check server
+  try {
+    const resp = await chrome.runtime.sendMessage({ action: 'check-server' });
+    const status = document.getElementById('status');
+    if (resp.ok && resp.data?.connected) {
+      status.className = 'status connected';
+      status.textContent = '✅ 已连接服务器';
+    } else {
+      status.className = 'status disconnected';
+      status.textContent = '❌ 服务器未运行 — 终端执行 hlweb';
+    }
+  } catch(e) {
+    document.getElementById('status').className = 'status disconnected';
+    document.getElementById('status').textContent = '❌ 无法连接';
+  }
+
+  // Load highlights for current tab
+  try {
+    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+    if (tab?.url) {
+      const resp = await chrome.runtime.sendMessage({
+        action: 'get-highlights',
+        url: tab.url
+      });
+      const items = resp.ok ? (resp.data || []) : [];
+      const content = document.getElementById('content');
+      if (items.length === 0) {
+        content.innerHTML = '<div class="empty">📭 此页面暂无高亮<br><span style="font-size:12px;">选中文字即可标注</span></div>';
+      } else {
+        content.innerHTML = items.map(h => `
+          <div class="hl-item">
+            <div class="hl-dot" style="background:${COLORS[h.color] || COLORS.yellow}"></div>
+            <div class="hl-text">
+              <div>${esc(h.text || '').slice(0, 60)}${(h.text||'').length > 60 ? '...' : ''}</div>
+              ${h.note ? `<div class="note">💬 ${esc(h.note)}</div>` : ''}
+              <div class="hl-time">${h.created_at || ''}</div>
+            </div>
+          </div>
+        `).join('');
+      }
+    }
+  } catch(e) {
+    document.getElementById('content').innerHTML = `<div class="empty">❌ 加载失败</div>`;
+  }
+}
+
+function esc(s) { if(!s)return ''; const d=document.createElement('div'); d.textContent=s; return d.innerHTML; }
+
+document.getElementById('open-webui').addEventListener('click', () => {
+  chrome.tabs.create({ url: 'http://localhost:8899' });
+});
+
+document.getElementById('refresh').addEventListener('click', load);
+
+load();
+</script>
+</body>
+</html>

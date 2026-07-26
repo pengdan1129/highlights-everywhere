@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.highlights.server</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>/usr/bin/python3</string>
+        <string>/Users/pengdan/scripts/hl-server.py</string>
+        <string>--daemon</string>
+    </array>
+    <key>RunAtLoad</key>
+    <true/>
+    <key>KeepAlive</key>
+    <true/>
+    <key>StandardOutPath</key>
+    <string>/Users/pengdan/Highlights/.server.log</string>
+    <key>StandardErrorPath</key>
+    <string>/Users/pengdan/Highlights/.server.log</string>
+    <key>WorkingDirectory</key>
+    <string>/Users/pengdan/scripts</string>
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>NO_PROXY</key>
+        <string>localhost,127.0.0.1</string>
+        <key>no_proxy</key>
+        <string>localhost,127.0.0.1</string>
+    </dict>
+</dict>
+</plist>
