@@ -4,15 +4,19 @@
 > **选中即高亮，随手记笔记，Spotlight 一键搜到。**
 
 <p align="center">
-  <img src="images/demo-overview.svg" alt="Highlights Everywhere Demo" width="750">
+  <img src="images/demo-toolbar.png" alt="Highlight text on any webpage with colored toolbar" width="750">
 </p>
 
 <p align="center">
-  <em>选中文字 → 点颜色 → 写备注 → 点高亮可编辑/删除 → Cmd+Space 搜到</em>
+  <em>选中文字 → 工具栏自动弹出 → 选颜色 → 写备注 → 高亮保存</em>
 </p>
 
 <p align="center">
-  <img src="images/demo-cli.svg" alt="CLI and Spotlight Search" width="750">
+  <img src="images/demo-spotlight.png" alt="macOS Spotlight finds your highlights" width="750">
+</p>
+
+<p align="center">
+  <em>Cmd+Space 直接搜到所有高亮内容</em>
 </p>
 
 ---
