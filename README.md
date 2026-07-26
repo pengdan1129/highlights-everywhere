@@ -3,6 +3,18 @@
 > **Highlight text, take notes, find them instantly via Spotlight.**
 > **选中即高亮，随手记笔记，Spotlight 一键搜到。**
 
+<p align="center">
+  <img src="images/demo-toolbar.png" alt="Highlights Everywhere Demo" width="700">
+</p>
+
+<p align="center">
+  <em>Select text → pick a color → add a note → search with Cmd+Space</em>
+</p>
+
+<p align="center">
+  <img src="images/demo-spotlight.png" alt="Spotlight Search" width="700">
+</p>
+
 ---
 
 ## 中文介绍
