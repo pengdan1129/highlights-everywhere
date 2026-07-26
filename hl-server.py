@@ -81,14 +81,13 @@ hex_color: {data['hex_color']}
 page_title: "{page_title}"
 date: {date_str}
 time: {data['time']}
-note: "{note or ''}"
 type: web_highlight
 ---
 
 ## <span style="background-color:{data['hex_color']};padding:2px 6px;border-radius:3px">📌 Web Highlight</span>
 
 > {text}
-{chr(10) + '📝 **笔记**: ' + note if note else ''}
+{chr(10) + '💬 **备注**: ' + note if note else ''}
 
 ---
 *Source: [{page_title}]({url})* | *Color: {color}* | *{ts_str}*
@@ -538,6 +537,35 @@ class HighlightHandler(http.server.SimpleHTTPRequestHandler):
             except Exception:
                 pass
         if count:
+            # Also update the corresponding markdown file
+            id_prefix = hl_id[:14]  # YYYYMMDDHHMMSS
+            md_date = f"{hl_id[:4]}-{hl_id[4:6]}-{hl_id[6:8]}"
+            md_time = hl_id[8:14]
+            md_dir = HIGHLIGHTS_DIR / hl_id[:4] / hl_id[4:6]
+            for md_fp in md_dir.glob(f"{md_date}-{md_time}-*.md"):
+                try:
+                    md_content = md_fp.read_text(encoding='utf-8')
+                    # Update note in frontmatter
+                    if new_note is not None:
+                        # Update body note line: 💬 **备注**: ...
+                        md_content = re.sub(
+                            r'💬 \*\*备注\*\*: .*',
+                            f'💬 **备注**: {new_note}',
+                            md_content
+                        )
+                    if new_color is not None:
+                        new_hex = VALID_COLORS.get(new_color, '#FFF176')
+                        md_content = re.sub(r'^color: .*', f'color: {new_color}', md_content, flags=re.MULTILINE)
+                        md_content = re.sub(r'^hex_color: .*', f'hex_color: {new_hex}', md_content, flags=re.MULTILINE)
+                        # Also update the inline style span
+                        md_content = re.sub(
+                            r'background-color:#[0-9A-Fa-f]+',
+                            f'background-color:{new_hex}',
+                            md_content
+                        )
+                    md_fp.write_text(md_content, encoding='utf-8')
+                except Exception:
+                    pass
             self.send_json({'success': True, 'highlight': existing})
         else:
             self.send_json({'error': 'Not found'}, 404)
