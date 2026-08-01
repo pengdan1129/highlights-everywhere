@@ -41,7 +41,7 @@
 
 ### 快速开始
 
-> 💡 **数据存在 iCloud Drive**（`~/Highlights` → iCloud），Mac 和 iPhone/iPad 自动同步，手机"文件"App 也能搜到所有高亮。
+> 💡 **数据存在本地** `~/Highlights/`，同时自动同步到 Apple 备忘录（Notes），手机备忘录直接阅读。
 
 ```bash
 # 1. 克隆仓库
@@ -108,8 +108,8 @@ hlweb                         # 启动服务器 + 打开网页
 - **存储格式**: Markdown + YAML 元数据（人类可读）
 - **按来源聚合**: 同一个 URL 的所有高亮存在一个 markdown 文件里（`~/Highlights/sources/<域名>-<路径>.md`），`source` 是 frontmatter 里的 metadata 字段，一个来源一篇笔记
 - **搜索**: 底层使用 macOS `mdfind`（Spotlight）
-- **数据安全**: 全在本地/iCloud，不上传任何云端
-- **文件位置**: `~/Highlights/`（iCloud Drive 同步）
+- **数据安全**: 全在本地 + Apple 备忘录，不上传任何云端
+- **文件位置**: `~/Highlights/`（本地；手机阅读走 Apple 备忘录同步）
 
 ---
 
@@ -133,7 +133,7 @@ A universal highlighting & note-taking tool for macOS. **Select text in any app 
 
 ### Quick Start
 
-> 💡 **Data lives in iCloud Drive** (`~/Highlights` → iCloud). Auto-syncs to your iPhone/iPad — searchable in the Files app on mobile.
+> 💡 **Data lives locally** in `~/Highlights/`, and each highlight is mirrored to Apple Notes — read them on your iPhone in the Notes app.
 
 ```bash
 # 1. Clone

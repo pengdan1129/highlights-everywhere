@@ -10,9 +10,13 @@ import os
 import re
 import json
 import uuid
+import html
+import time
 import hashlib
 import datetime
 import webbrowser
+import threading
+import subprocess
 import http.server
 import socketserver
 import urllib.parse
@@ -47,16 +51,15 @@ SOURCES_DIR.mkdir(parents=True, exist_ok=True)
 # ─── Storage ──────────────────────────────────────────────────────────
 
 def save_web_highlight(url, text, color, note, selector, page_title=""):
-    """Save a highlight from the Chrome extension."""
+    """Save a highlight from the browser script.
+
+    Storage: ONE aggregated markdown file per source URL (sources/<domain>-<path>.md).
+    No per-highlight JSON or per-highlight md files anymore.
+    """
     ts = datetime.datetime.now()
     ts_str = ts.strftime("%Y-%m-%d %H:%M:%S")
     date_str = ts.strftime("%Y-%m-%d")
     hl_id = ts.strftime("%Y%m%d%H%M%S") + "-" + uuid.uuid4().hex[:8]
-
-    dir_path = EXT_DIR / str(ts.year) / f"{ts.month:02d}"
-    dir_path.mkdir(parents=True, exist_ok=True)
-
-    filepath = dir_path / f"{hl_id}.json"
 
     data = {
         "id": hl_id,
@@ -72,34 +75,7 @@ def save_web_highlight(url, text, color, note, selector, page_title=""):
         "time": ts.strftime("%H:%M:%S"),
     }
 
-    filepath.write_text(json.dumps(data, ensure_ascii=False, indent=2) + "\n")
-
-    # Also save a markdown copy for human reading and Spotlight indexing
-    md_dir = HIGHLIGHTS_DIR / str(ts.year) / f"{ts.month:02d}"
-    md_dir.mkdir(parents=True, exist_ok=True)
-    safe_text = re.sub(r'[\\/:*?"<>|]', ' ', text)[:50]
-    md_path = md_dir / f"{ts.strftime('%Y-%m-%d-%H%M%S')}-{color}-web-{safe_text}.md"
-    md_content = f"""---
-url: {url}
-color: {color}
-hex_color: {data['hex_color']}
-page_title: "{page_title}"
-date: {date_str}
-time: {data['time']}
-type: web_highlight
----
-
-## <span style="background-color:{data['hex_color']};padding:2px 6px;border-radius:3px">📌 Web Highlight</span>
-
-> {text}
-{chr(10) + '💬 **备注**: ' + note if note else ''}
-
----
-*Source: [{page_title}]({url})* | *Color: {color}* | *{ts_str}*
-"""
-    md_path.write_text(md_content.strip() + "\n")
-
-    # Also append to the per-source aggregated markdown file
+    # Append to the per-source aggregated markdown file (the only storage)
     upsert_highlight_in_md(data)
 
     return data
@@ -111,6 +87,91 @@ COLOR_EMOJI = {
     'yellow': '🟡', 'green': '🟢', 'blue': '🔵', 'red': '🔴',
     'purple': '🟣', 'orange': '🟠', 'pink': '🩷',
 }
+
+
+# ─── Apple Notes sync ────────────────────────────────────────────────
+
+NOTES_FOLDER = 'Highlights'  # 备忘录文件夹（不存在自动创建）
+
+# JXA 模板：按 URL 聚合 —— 同一个链接的所有高亮追加到同一条 note。
+# __FOLDER__ / __NOTE_NAME__ / __ENTRY__ 用 json.dumps 注入（JSON 即合法 JS 字符串字面量）
+_NOTES_JS = r"""
+const Notes = Application('Notes');
+function getOrCreateFolder(name) {
+  const folders = Notes.folders();
+  for (let i = 0; i < folders.length; i++) {
+    if (folders[i].name() === name) return folders[i];
+  }
+  return Notes.make({new: 'folder', withProperties: {name: name}});
+}
+const folder = getOrCreateFolder(__FOLDER__);
+let target = null;
+const notes = folder.notes();
+for (let i = 0; i < notes.length; i++) {
+  if (notes[i].name() === __NOTE_NAME__) { target = notes[i]; break; }
+}
+if (target) {
+  target.body = target.body() + __ENTRY__;
+  'APPENDED: ' + target.name();
+} else {
+  const note = Notes.make({new: 'note', at: folder, withProperties: {name: __NOTE_NAME__, body: __ENTRY__}});
+  'CREATED: ' + note.name();
+}
+"""
+
+
+def _notes_name_for_url(url):
+    """Deterministic note title per URL: 📌 <domain>-<path-slug>."""
+    p = urllib.parse.urlparse(url or '')
+    domain = p.netloc or 'local'
+    path_part = re.sub(r'[^a-zA-Z0-9]+', '-', p.path.strip('/')).strip('-')[:30]
+    return f"📌 {domain}" + (f"-{path_part}" if path_part else '')
+
+
+def sync_to_notes(color, text, note, page_title, url):
+    """异步把一条高亮写入 Apple Notes，按 URL 聚合到同一条 note（追加）。
+
+    Apple Notes 的 HTML 导入不支持背景色（span/mark/td 的背景样式全被剥），
+    但支持文字颜色(<font color>)、粗体、链接、emoji —— 用文字色 + emoji 区分。
+    失败只打日志，不影响主流程。
+    """
+    DIAG = Path.home() / 'scripts' / 'notes-sync.log'
+
+    def _log(msg):
+        try:
+            with open(DIAG, 'a') as f:
+                f.write(f"[{datetime.datetime.now().strftime('%H:%M:%S')}] {msg}\n")
+        except Exception:
+            pass
+
+    def _run():
+        try:
+            hex_c = VALID_COLORS.get(color, '#FFF176')
+            emoji = COLOR_EMOJI.get(color, '🟡')
+            clean_text = (text or '').strip()
+            ts_str = datetime.datetime.now().strftime('%Y-%m-%d %H:%M')
+
+            entry = (f'<div><font color="{hex_c}" size="4"><b>{html.escape(clean_text)}</b></font></div>')
+            if note:
+                entry += f'<div><b>💬 备注：</b>{html.escape(note)}</div>'
+            if page_title:
+                entry += f'<div>📄 {html.escape(page_title)}</div>'
+            entry += f'<div><span style="color: #86868b;">🕐 {ts_str} · {emoji}</span></div><div><br></div>'
+
+            js = (_NOTES_JS
+                  .replace('__FOLDER__', json.dumps(NOTES_FOLDER))
+                  .replace('__NOTE_NAME__', json.dumps(_notes_name_for_url(url)))
+                  .replace('__ENTRY__', json.dumps(entry)))
+            r = subprocess.run(['osascript', '-l', 'JavaScript', '-e', js],
+                               capture_output=True, text=True, timeout=30)
+            if r.returncode != 0:
+                _log(f'FAILED rc={r.returncode}: {r.stderr.strip()[:200]}')
+            else:
+                _log(f'OK {r.stdout.strip()[:80]}')
+        except Exception as e:
+            _log(f'ERROR: {e}')
+
+    threading.Thread(target=_run, daemon=True).start()
 
 
 def md_path_for_url(url):
@@ -192,30 +253,82 @@ def load_web_highlight(filepath):
         return None
 
 
+def parse_aggregated_md(fp):
+    """Parse a per-source aggregated markdown file into highlight entries.
+
+    Format per entry:
+        <!--hl:<id>-->
+        ### 🟢 2026-08-02 00:47:57
+        > highlighted text
+        > 💬 **备注**: note
+    """
+    results = []
+    try:
+        content = fp.read_text(encoding='utf-8')
+    except Exception:
+        return results
+    fm = re.match(r'^---\s*\n(.*?)\n---\s*\n', content, re.DOTALL)
+    if not fm:
+        return results
+    meta = {}
+    for line in fm.group(1).split('\n'):
+        m = re.match(r'^(\w+):\s*(.*)', line)
+        if m:
+            meta[m.group(1)] = m.group(2).strip().strip('"\'')
+    body = content[fm.end():]
+    blocks = re.split(r'(?=<!--hl:[\w-]+-->)', body)
+    for blk in blocks:
+        m = re.search(r'<!--hl:([\w-]+)-->', blk)
+        if not m:
+            continue
+        hl_id = m.group(1)
+        ts_m = re.search(r'^### (\S+) ([\d-]+ [\d:]+)', blk, re.MULTILINE)
+        quote_m = re.search(r'^> (.+?)(?:\n|$)', blk, re.MULTILINE)
+        note_m = re.search(r'^> 💬 \*\*备注\*\*: (.+)$', blk, re.MULTILINE)
+        color = 'yellow'
+        if ts_m:
+            for c, emoji_c in COLOR_EMOJI.items():
+                if emoji_c == ts_m.group(1):
+                    color = c
+                    break
+        results.append({
+            'id': hl_id,
+            'url': meta.get('source', meta.get('url', '')),
+            'page_title': meta.get('page_title', ''),
+            'text': (quote_m.group(1).strip() if quote_m else ''),
+            'color': color,
+            'hex_color': VALID_COLORS.get(color, '#FFF176'),
+            'note': (note_m.group(1).strip() if note_m else ''),
+            'created_at': (ts_m.group(2) if ts_m else ''),
+            '_type': 'web',
+            '_path': str(fp),
+        })
+    return results
+
+
 def load_all_highlights(limit=None):
-    """Load all highlights (both web JSON and CLI markdown)."""
+    """Load all highlights: web ones from per-source aggregated md files,
+    CLI ones from the dated markdown files (no URL → not in sources/)."""
     results = []
 
-    # Load web highlights (JSON)
-    web_files = sorted(EXT_DIR.rglob('*.json'), key=lambda p: p.stat().st_mtime, reverse=True)
-    for fp in web_files:
-        h = load_web_highlight(fp)
-        if h:
-            results.append(h)
+    # Web highlights: parse every per-source aggregated file
+    for fp in sorted(SOURCES_DIR.glob('*.md'), key=lambda p: p.stat().st_mtime, reverse=True):
+        results.extend(parse_aggregated_md(fp))
 
-    # Load CLI highlights (markdown) - only those not already in web format
-    # Markdown files with type: web_highlight are already covered by JSON
+    # CLI highlights: dated md files that are NOT web_highlight type
     md_files = sorted(HIGHLIGHTS_DIR.rglob('*.md'), key=lambda p: p.stat().st_mtime, reverse=True)
     for fp in md_files:
-        # Check if it's a web highlight duplicate (has corresponding JSON)
-        content = fp.read_text(encoding='utf-8')
-        if 'type: web_highlight' in content or '_web/' in str(fp):
+        try:
+            content = fp.read_text(encoding='utf-8')
+        except Exception:
             continue
-        # Parse basic info
+        if 'type: web_highlight' in content or '/sources/' in str(fp) or '_web/' in str(fp):
+            continue
         h = parse_md_highlight(fp, content)
         if h:
             results.append(h)
 
+    results.sort(key=lambda h: h.get('created_at') or h.get('mtime') or '', reverse=True)
     if limit:
         results = results[:limit]
     return results
@@ -264,29 +377,33 @@ def parse_md_highlight(fp, content):
 
 
 def get_highlights_for_url(url):
-    """Get all web highlights for a specific URL."""
-    results = []
-    for fp in sorted(EXT_DIR.rglob('*.json'), key=lambda p: p.stat().st_mtime):
-        h = load_web_highlight(fp)
-        if h and h.get('url') == url:
-            results.append(h)
-    return results
+    """Get all web highlights for a specific URL (from its aggregated file)."""
+    fp = md_path_for_url(url)
+    if not fp.exists():
+        return []
+    return [h for h in parse_aggregated_md(fp) if h.get('url') == url]
 
 
 def delete_highlight(hl_id):
-    """Delete a highlight by ID."""
+    """Delete a highlight by ID from its aggregated source file."""
     count = 0
-    for fp in EXT_DIR.rglob('*.json'):
+    for fp in SOURCES_DIR.glob('*.md'):
         try:
-            data = json.loads(fp.read_text(encoding='utf-8'))
-            if data.get('id') == hl_id:
-                fp.unlink()
-                count += 1
-                # Remove its entry from the per-source aggregated markdown
-                upsert_highlight_in_md(data, remove=True)
-                break
+            content = fp.read_text(encoding='utf-8')
         except Exception:
-            pass
+            continue
+        marker = f"<!--hl:{hl_id}-->"
+        if marker in content:
+            # Build a minimal data dict so upsert remove can locate the file
+            data = {'url': None, 'id': hl_id}
+            for line in content.split('\n'):
+                if line.startswith('source:'):
+                    data['url'] = line.split(':', 1)[1].strip()
+                    break
+            if data['url']:
+                upsert_highlight_in_md(data, remove=True)
+                count += 1
+            break
     return count
 
 
@@ -503,6 +620,13 @@ load();
 
 # ─── HTTP Server ──────────────────────────────────────────────────────
 
+class HighlightServer(socketserver.ThreadingTCPServer):
+    """Threaded server with address reuse (fixes TIME_WAIT bind failures
+    and single-threaded blocking after restart races)."""
+    allow_reuse_address = True
+    daemon_threads = True
+
+
 class HighlightHandler(http.server.SimpleHTTPRequestHandler):
     def do_GET(self):
         parsed = urllib.parse.urlparse(self.path)
@@ -513,6 +637,41 @@ class HighlightHandler(http.server.SimpleHTTPRequestHandler):
 
         elif parsed.path == '/api/highlights':
             self.handle_get_highlights(params)
+
+        elif parsed.path == '/api/debug':
+            import os as _os
+            symlink_target = _os.readlink(str(HIGHLIGHTS_DIR)) if HIGHLIGHTS_DIR.is_symlink() else None
+            probe = None
+            probe_files = sorted(HIGHLIGHTS_DIR.rglob('*.md')) if HIGHLIGHTS_DIR.exists() else []
+            if probe_files:
+                try:
+                    probe = probe_files[0].read_text(encoding='utf-8')[:80]
+                except Exception as e:
+                    probe = f'READ_ERROR: {e}'
+            # 直接读已知路径（绕过枚举）
+            known = Path('/Users/pengdan/Highlights/2026/08/2026-08-02-004757-green-web-Sparse attention methods exploit the inherent spar.md')
+            direct_read = None
+            try:
+                direct_read = known.read_text(encoding='utf-8')[:80]
+            except Exception as e:
+                direct_read = f'DIRECT_READ_ERROR: {e}'
+            try:
+                ls_listing = _os.listdir(str(HIGHLIGHTS_DIR / '2026' / '08'))
+            except Exception as e:
+                ls_listing = f'LISTDIR_ERROR: {e}'
+            self.send_json({
+                'home': str(Path.home()),
+                'cwd': os.getcwd(),
+                'highlights_dir': str(HIGHLIGHTS_DIR),
+                'symlink_target': symlink_target,
+                'exists': HIGHLIGHTS_DIR.exists(),
+                'md_count': len(probe_files),
+                'web_json_count': len(list(EXT_DIR.rglob('*.json'))),
+                'probe_first_md': probe,
+                'direct_read_known_file': direct_read,
+                'listdir_2026_08': ls_listing if isinstance(ls_listing, str) else f'{len(ls_listing)} items',
+                'ext_dir': str(EXT_DIR),
+            })
 
         elif parsed.path == '/highlight.user.js':
             self.send_userscript()
@@ -545,6 +704,12 @@ class HighlightHandler(http.server.SimpleHTTPRequestHandler):
 
     def handle_get_highlights(self, params):
         url = params.get('url', [None])[0]
+        # 访问日志：确认 Tampermonkey 脚本是否真的在请求服务器
+        try:
+            with open(Path.home() / 'scripts' / 'hl-access.log', 'a') as _f:
+                _f.write(f"[{datetime.datetime.now().strftime('%H:%M:%S')}] GET highlights url={url or 'ALL'} from {self.client_address[0]}\n")
+        except Exception:
+            pass
 
         if url:
             # Filter by URL (for Chrome extension)
@@ -580,6 +745,8 @@ class HighlightHandler(http.server.SimpleHTTPRequestHandler):
             return
 
         result = save_web_highlight(url, text, color, note, selector, page_title)
+        # 同步一条到 Apple Notes（异步，失败不影响保存）
+        sync_to_notes(color, text, note, page_title, url)
         self.send_json({'success': True, 'highlight': result})
 
     def handle_delete_highlight(self, data):
@@ -595,7 +762,7 @@ class HighlightHandler(http.server.SimpleHTTPRequestHandler):
         pass
 
     def handle_update_highlight(self, data):
-        """Update a highlight's note and/or color."""
+        """Update a highlight's note and/or color (in its aggregated source file)."""
         hl_id = data.get('id', '')
         new_note = data.get('note', None)
         new_color = data.get('color', None)
@@ -603,58 +770,25 @@ class HighlightHandler(http.server.SimpleHTTPRequestHandler):
             self.send_json({'error': 'Missing id'}, 400)
             return
         count = 0
-        for fp in EXT_DIR.rglob('*.json'):
+        for fp in SOURCES_DIR.glob('*.md'):
             try:
-                existing = json.loads(fp.read_text(encoding='utf-8'))
-                if existing.get('id') == hl_id:
+                entries = parse_aggregated_md(fp)
+            except Exception:
+                continue
+            for h in entries:
+                if h.get('id') == hl_id:
                     if new_note is not None:
-                        existing['note'] = new_note
+                        h['note'] = new_note
                     if new_color is not None:
-                        existing['color'] = new_color
-                        existing['hex_color'] = VALID_COLORS.get(new_color, '#FFF176')
-                    existing['updated_at'] = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                    fp.write_text(json.dumps(existing, ensure_ascii=False, indent=2) + "\n")
+                        h['color'] = new_color
+                        h['hex_color'] = VALID_COLORS.get(new_color, '#FFF176')
+                    upsert_highlight_in_md(h, remove=False)
                     count = 1
                     break
-            except Exception:
-                pass
+            if count:
+                break
         if count:
-            # Also update the corresponding markdown file
-            id_prefix = hl_id[:14]  # YYYYMMDDHHMMSS
-            md_date = f"{hl_id[:4]}-{hl_id[4:6]}-{hl_id[6:8]}"
-            md_time = hl_id[8:14]
-            md_dir = HIGHLIGHTS_DIR / hl_id[:4] / hl_id[4:6]
-            for md_fp in md_dir.glob(f"{md_date}-{md_time}-*.md"):
-                try:
-                    md_content = md_fp.read_text(encoding='utf-8')
-                    # Update note in frontmatter
-                    if new_note is not None:
-                        # Update body note line: (optionally quoted) 💬 **备注**: ...
-                        md_content = re.sub(
-                            r'^>? *💬 \*\*备注\*\*: .*$',
-                            f'> 💬 **备注**: {new_note}',
-                            md_content,
-                            flags=re.MULTILINE
-                        )
-                    if new_color is not None:
-                        new_hex = VALID_COLORS.get(new_color, '#FFF176')
-                        md_content = re.sub(r'^color: .*', f'color: {new_color}', md_content, flags=re.MULTILINE)
-                        md_content = re.sub(r'^hex_color: .*', f'hex_color: {new_hex}', md_content, flags=re.MULTILINE)
-                        # Also update the inline style span
-                        md_content = re.sub(
-                            r'background-color:#[0-9A-Fa-f]+',
-                            f'background-color:{new_hex}',
-                            md_content
-                        )
-                    md_fp.write_text(md_content, encoding='utf-8')
-                except Exception:
-                    pass
-            # Sync the per-source aggregated markdown entry
-            try:
-                upsert_highlight_in_md(existing)
-            except Exception:
-                pass
-            self.send_json({'success': True, 'highlight': existing})
+            self.send_json({'success': True, 'highlight': h})
         else:
             self.send_json({'error': 'Not found'}, 404)
 
@@ -1035,18 +1169,19 @@ class HighlightHandler(http.server.SimpleHTTPRequestHandler):
 
 
 def start_server(daemon=False):
-    """Start the highlights server."""
+    """Start the highlights server. Fixed port; waits for it to free up."""
     port = WEB_PORT
-    for attempt in range(10):
+    # Wait for the port to free (launchd restart races), never silently switch ports
+    server = None
+    for _ in range(20):
         try:
-            server = socketserver.TCPServer(("", port), HighlightHandler)
+            server = HighlightServer(("", port), HighlightHandler)
             break
         except OSError:
-            port += 1
-    else:
-        if not daemon:
-            print("❌ Could not find a free port")
-        return port
+            time.sleep(0.5)
+    if server is None:
+        print(f"❌ Port {port} still busy after 10s", flush=True)
+        sys.exit(1)
 
     if not daemon:
         print(f"\n{'='*50}")
