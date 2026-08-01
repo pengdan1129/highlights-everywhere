@@ -41,6 +41,8 @@
 
 ### 快速开始
 
+> 💡 **数据存在 iCloud Drive**（`~/Highlights` → iCloud），Mac 和 iPhone/iPad 自动同步，手机"文件"App 也能搜到所有高亮。
+
 ```bash
 # 1. 克隆仓库
 git clone https://github.com/YOUR_USERNAME/highlights-everywhere.git
@@ -129,6 +131,8 @@ A universal highlighting & note-taking tool for macOS. **Select text in any app 
 | 🚀 **Auto-start** | Runs as a background service, no manual startup needed |
 
 ### Quick Start
+
+> 💡 **Data lives in iCloud Drive** (`~/Highlights` → iCloud). Auto-syncs to your iPhone/iPad — searchable in the Files app on mobile.
 
 ```bash
 # 1. Clone

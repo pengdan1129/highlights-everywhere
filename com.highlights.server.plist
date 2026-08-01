@@ -15,9 +15,9 @@
     <key>KeepAlive</key>
     <true/>
     <key>StandardOutPath</key>
-    <string>/Users/pengdan/Highlights/.server.log</string>
+    <string>/Users/pengdan/scripts/hl-server.log</string>
     <key>StandardErrorPath</key>
-    <string>/Users/pengdan/Highlights/.server.log</string>
+    <string>/Users/pengdan/scripts/hl-server.log</string>
     <key>WorkingDirectory</key>
     <string>/Users/pengdan/scripts</string>
     <key>EnvironmentVariables</key>
