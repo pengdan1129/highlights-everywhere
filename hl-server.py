@@ -132,7 +132,7 @@ def _hl_entry_block(data):
     note = (data.get('note', '') or '').strip()
     block = f"<!--hl:{hl_id}-->\n### {emoji} {ts}\n> {text}\n"
     if note:
-        block += f"💬 **备注**: {note}\n"
+        block += f"> 💬 **备注**: {note}\n"
     return block + "\n"
 
 
@@ -629,11 +629,12 @@ class HighlightHandler(http.server.SimpleHTTPRequestHandler):
                     md_content = md_fp.read_text(encoding='utf-8')
                     # Update note in frontmatter
                     if new_note is not None:
-                        # Update body note line: 💬 **备注**: ...
+                        # Update body note line: (optionally quoted) 💬 **备注**: ...
                         md_content = re.sub(
-                            r'💬 \*\*备注\*\*: .*',
-                            f'💬 **备注**: {new_note}',
-                            md_content
+                            r'^>? *💬 \*\*备注\*\*: .*$',
+                            f'> 💬 **备注**: {new_note}',
+                            md_content,
+                            flags=re.MULTILINE
                         )
                     if new_color is not None:
                         new_hex = VALID_COLORS.get(new_color, '#FFF176')
