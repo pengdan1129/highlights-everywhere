@@ -100,15 +100,16 @@ hlweb                         # 启动服务器 + 打开网页
 ```
 用户选中文字 → Tampermonkey 脚本 / 书签工具
   → fetch 发送到本地服务器（localhost:8899）
-  → 服务器保存到 ~/Highlights/YYYY/MM/*.md
+  → 服务器保存到 ~/Highlights/
   → macOS Spotlight 自动索引
   → Cmd+Space 即可搜索
 ```
 
 - **存储格式**: Markdown + YAML 元数据（人类可读）
+- **按来源聚合**: 同一个 URL 的所有高亮存在一个 markdown 文件里（`~/Highlights/sources/<域名>-<路径>.md`），`source` 是 frontmatter 里的 metadata 字段，一个来源一篇笔记
 - **搜索**: 底层使用 macOS `mdfind`（Spotlight）
-- **数据安全**: 全在本地，不上传任何云端
-- **文件位置**: `~/Highlights/`
+- **数据安全**: 全在本地/iCloud，不上传任何云端
+- **文件位置**: `~/Highlights/`（iCloud Drive 同步）
 
 ---
 

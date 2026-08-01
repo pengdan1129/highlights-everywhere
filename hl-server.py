@@ -10,6 +10,7 @@ import os
 import re
 import json
 import uuid
+import hashlib
 import datetime
 import webbrowser
 import http.server
@@ -38,6 +39,10 @@ COLOR_NAMES_CN = {
 }
 
 EXT_DIR.mkdir(parents=True, exist_ok=True)
+
+# Per-source aggregated markdown directory (same URL → one file)
+SOURCES_DIR = HIGHLIGHTS_DIR / 'sources'
+SOURCES_DIR.mkdir(parents=True, exist_ok=True)
 
 # ─── Storage ──────────────────────────────────────────────────────────
 
@@ -94,7 +99,85 @@ type: web_highlight
 """
     md_path.write_text(md_content.strip() + "\n")
 
+    # Also append to the per-source aggregated markdown file
+    upsert_highlight_in_md(data)
+
     return data
+
+
+# ─── Per-source aggregated markdown ──────────────────────────────────
+
+COLOR_EMOJI = {
+    'yellow': '🟡', 'green': '🟢', 'blue': '🔵', 'red': '🔴',
+    'purple': '🟣', 'orange': '🟠', 'pink': '🩷',
+}
+
+
+def md_path_for_url(url):
+    """Stable per-source markdown file path for a URL."""
+    p = urllib.parse.urlparse(url)
+    domain = p.netloc or 'local'
+    path_slug = re.sub(r'[^a-zA-Z0-9]+', '-', p.path.strip('/')).strip('-')[:60]
+    h = hashlib.md5(url.encode('utf-8')).hexdigest()[:6]
+    fname = f"{domain}-{path_slug or 'home'}-{h}.md"
+    return SOURCES_DIR / fname
+
+
+def _hl_entry_block(data):
+    """Build the markdown block for one highlight entry."""
+    hl_id = data.get('id', '')
+    emoji = COLOR_EMOJI.get(data.get('color', 'yellow'), '🟡')
+    ts = data.get('created_at', '') or ''
+    text = (data.get('text', '') or '').replace('\n', ' ')
+    note = (data.get('note', '') or '').strip()
+    block = f"<!--hl:{hl_id}-->\n### {emoji} {ts}\n> {text}\n"
+    if note:
+        block += f"💬 **备注**: {note}\n"
+    return block + "\n"
+
+
+def upsert_highlight_in_md(data, remove=False):
+    """Insert/update/remove one highlight entry in the per-source md file."""
+    url = data.get('url', '')
+    hl_id = data.get('id', '')
+    if not url or not hl_id:
+        return
+    md_path = md_path_for_url(url)
+    marker = f"<!--hl:{hl_id}-->"
+
+    if remove:
+        if md_path.exists():
+            content = md_path.read_text(encoding='utf-8')
+            new_content = re.sub(
+                re.escape(marker) + r'.*?(?=<!--hl:|\Z)',
+                '', content, flags=re.DOTALL)
+            if new_content.strip() != content.strip():
+                md_path.write_text(new_content.rstrip() + "\n", encoding='utf-8')
+        return
+
+    block = _hl_entry_block(data)
+    if md_path.exists():
+        content = md_path.read_text(encoding='utf-8')
+        # Replace existing entry if present, otherwise append
+        if marker in content:
+            content = re.sub(
+                re.escape(marker) + r'.*?(?=<!--hl:|\Z)',
+                block, content, flags=re.DOTALL)
+        else:
+            content = content.rstrip() + "\n\n" + block
+        md_path.write_text(content.rstrip() + "\n", encoding='utf-8')
+    else:
+        SOURCES_DIR.mkdir(parents=True, exist_ok=True)
+        md = f"""---
+source: {url}
+page_title: "{data.get('page_title', '')}"
+type: web_highlight
+---
+
+## 📌 Web Highlights
+
+{block}"""
+        md_path.write_text(md, encoding='utf-8')
 
 
 def load_web_highlight(filepath):
@@ -199,10 +282,9 @@ def delete_highlight(hl_id):
             if data.get('id') == hl_id:
                 fp.unlink()
                 count += 1
-                # Also delete corresponding markdown
-                for mf in HIGHLIGHTS_DIR.rglob(f"*{hl_id[:8]}*.md"):
-                    mf.unlink()
-                    count += 1
+                # Remove its entry from the per-source aggregated markdown
+                upsert_highlight_in_md(data, remove=True)
+                break
         except Exception:
             pass
     return count
@@ -566,6 +648,11 @@ class HighlightHandler(http.server.SimpleHTTPRequestHandler):
                     md_fp.write_text(md_content, encoding='utf-8')
                 except Exception:
                     pass
+            # Sync the per-source aggregated markdown entry
+            try:
+                upsert_highlight_in_md(existing)
+            except Exception:
+                pass
             self.send_json({'success': True, 'highlight': existing})
         else:
             self.send_json({'error': 'Not found'}, 404)
