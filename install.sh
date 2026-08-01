@@ -29,9 +29,20 @@ cp com.highlights.server.plist ~/Library/LaunchAgents/
 launchctl load ~/Library/LaunchAgents/com.highlights.server.plist 2>/dev/null || true
 echo "  -> ~/Library/LaunchAgents/com.highlights.server.plist"
 
-# 5. Create highlights directory
-mkdir -p ~/Highlights
-echo "  -> ~/Highlights/"
+# 5. Create highlights directory (use iCloud Drive if available for cross-device sync)
+ICLOUD_DIR="$HOME/Library/Mobile Documents/com~apple~CloudDocs/Highlights"
+if [ -d "$HOME/Library/Mobile Documents/com~apple~CloudDocs" ]; then
+    mkdir -p "$ICLOUD_DIR"
+    if [ ! -e ~/Highlights ]; then
+        ln -s "$ICLOUD_DIR" ~/Highlights
+        echo "  -> ~/Highlights → iCloud Drive (手机也可搜到)"
+    else
+        echo "  -> ~/Highlights already exists (kept as-is)"
+    fi
+else
+    mkdir -p ~/Highlights
+    echo "  -> ~/Highlights/ (iCloud not detected, using local)"
+fi
 
 # 6. Add PATH to shell config
 if ! grep -q 'scripts/hl' ~/.zshrc 2>/dev/null; then
