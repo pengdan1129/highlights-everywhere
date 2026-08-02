@@ -54,8 +54,30 @@ def save_web_highlight(url, text, color, note, selector, page_title=""):
     """Save a highlight from the browser script.
 
     Storage: ONE aggregated markdown file per source URL (sources/<domain>-<path>.md).
-    No per-highlight JSON or per-highlight md files anymore.
+    Dedup: same URL + same text → update the existing entry (color + append note),
+    never create a duplicate.
     """
+    # ── Dedup: same text already highlighted on this URL? ──
+    fp = md_path_for_url(url)
+    if fp.exists():
+        for h in parse_aggregated_md(fp):
+            if (h.get('text') or '').strip() == (text or '').strip():
+                changed = False
+                if color and h.get('color') != color:
+                    h['color'] = color
+                    h['hex_color'] = VALID_COLORS.get(color, '#FFF176')
+                    changed = True
+                new_note = (note or '').strip()
+                old_note = (h.get('note') or '').strip()
+                if new_note and new_note not in old_note:
+                    h['note'] = (old_note + '\n' + new_note) if old_note else new_note
+                    changed = True
+                if changed:
+                    upsert_highlight_in_md(h)
+                h['_type'] = 'web'
+                h['deduped'] = True
+                return h
+
     ts = datetime.datetime.now()
     ts_str = ts.strftime("%Y-%m-%d %H:%M:%S")
     date_str = ts.strftime("%Y-%m-%d")
@@ -93,8 +115,8 @@ COLOR_EMOJI = {
 
 NOTES_FOLDER = 'Highlights'  # 备忘录文件夹（不存在自动创建）
 
-# JXA 模板：按 URL 聚合 —— 同一个链接的所有高亮追加到同一条 note。
-# __FOLDER__ / __NOTE_NAME__ / __ENTRY__ 用 json.dumps 注入（JSON 即合法 JS 字符串字面量）
+# JXA 模板：按 URL 聚合 —— 覆盖式重建 note body（增删改后调用，保证与文件一致）。
+# __FOLDER__ / __NOTE_NAME__ / __BODY__ 用 json.dumps 注入
 _NOTES_JS = r"""
 const Notes = Application('Notes');
 function getOrCreateFolder(name) {
@@ -111,10 +133,11 @@ for (let i = 0; i < notes.length; i++) {
   if (notes[i].name() === __NOTE_NAME__) { target = notes[i]; break; }
 }
 if (target) {
-  target.body = target.body() + __ENTRY__;
-  'APPENDED: ' + target.name();
+  target.body = __BODY__;
+  target.name = __NOTE_NAME__;
+  'UPDATED: ' + target.name();
 } else {
-  const note = Notes.make({new: 'note', at: folder, withProperties: {name: __NOTE_NAME__, body: __ENTRY__}});
+  const note = Notes.make({new: 'note', at: folder, withProperties: {name: __NOTE_NAME__, body: __BODY__}});
   'CREATED: ' + note.name();
 }
 """
@@ -128,13 +151,32 @@ def _notes_name_for_url(url):
     return f"📌 {domain}" + (f"-{path_part}" if path_part else '')
 
 
-def sync_to_notes(color, text, note, page_title, url):
-    """异步把一条高亮写入 Apple Notes，按 URL 聚合到同一条 note（追加）。
+def _entry_html(h):
+    """One highlight entry as Notes HTML."""
+    color = h.get('color', 'yellow')
+    hex_c = VALID_COLORS.get(color, '#FFF176')
+    emoji = COLOR_EMOJI.get(color, '🟡')
+    text = (h.get('text', '') or '').strip()
+    note = (h.get('note', '') or '').strip()
+    ts = h.get('created_at', '')
+    url = (h.get('url', '') or '').strip()
+    hl_id = (h.get('id', '') or '')
+    parts = [f'<div><font color="{hex_c}" size="4"><b>{html.escape(text)}</b></font></div>']
+    # 原文位置链接（deep link 跳转到该高亮片段）：放在原文正下方
+    if url:
+        anchor = f'{url}#hl={hl_id}' if hl_id else url
+        parts.append(f'<div>🔗 <a href="{html.escape(anchor)}">原文位置</a></div>')
+    if note:
+        parts.append(f'<div><b>💬 备注：</b>{html.escape(note).replace(chr(10), "<br>")}</div>')
+    if h.get('page_title'):
+        parts.append(f'<div>📄 {html.escape(h["page_title"])}</div>')
+    parts.append(f'<div><span style="color: #86868b;">🕐 {html.escape(ts)} · {emoji}</span></div>')
+    parts.append('<div><br></div>')
+    return ''.join(parts)
 
-    Apple Notes 的 HTML 导入不支持背景色（span/mark/td 的背景样式全被剥），
-    但支持文字颜色(<font color>)、粗体、链接、emoji —— 用文字色 + emoji 区分。
-    失败只打日志，不影响主流程。
-    """
+
+def sync_url_to_notes(url):
+    """Rebuild the Notes note for a URL from its aggregated file (create/overwrite)."""
     DIAG = Path.home() / 'scripts' / 'notes-sync.log'
 
     def _log(msg):
@@ -146,22 +188,32 @@ def sync_to_notes(color, text, note, page_title, url):
 
     def _run():
         try:
-            hex_c = VALID_COLORS.get(color, '#FFF176')
-            emoji = COLOR_EMOJI.get(color, '🟡')
-            clean_text = (text or '').strip()
-            ts_str = datetime.datetime.now().strftime('%Y-%m-%d %H:%M')
-
-            entry = (f'<div><font color="{hex_c}" size="4"><b>{html.escape(clean_text)}</b></font></div>')
-            if note:
-                entry += f'<div><b>💬 备注：</b>{html.escape(note)}</div>'
-            if page_title:
-                entry += f'<div>📄 {html.escape(page_title)}</div>'
-            entry += f'<div><span style="color: #86868b;">🕐 {ts_str} · {emoji}</span></div><div><br></div>'
-
+            fp = md_path_for_url(url)
+            entries = parse_aggregated_md(fp) if fp.exists() else []
+            if not entries:
+                # Nothing left for this URL → delete the note if it exists
+                js_del = r"""
+const Notes = Application('Notes');
+const folder = Notes.folders().find(f => f.name() === __FOLDER__);
+if (folder) {
+  const notes = folder.notes();
+  for (let i = 0; i < notes.length; i++) {
+    if (notes[i].name() === __NOTE_NAME__) { Notes.delete(notes[i]); 'DELETED'; break; }
+  }
+}
+"""
+                js_del = (js_del
+                          .replace('__FOLDER__', json.dumps(NOTES_FOLDER))
+                          .replace('__NOTE_NAME__', json.dumps(_notes_name_for_url(url))))
+                subprocess.run(['osascript', '-l', 'JavaScript', '-e', js_del],
+                               capture_output=True, text=True, timeout=30)
+                _log(f'DELETED note for {url}')
+                return
+            body = ''.join(_entry_html(h) for h in entries)
             js = (_NOTES_JS
                   .replace('__FOLDER__', json.dumps(NOTES_FOLDER))
                   .replace('__NOTE_NAME__', json.dumps(_notes_name_for_url(url)))
-                  .replace('__ENTRY__', json.dumps(entry)))
+                  .replace('__BODY__', json.dumps(body)))
             r = subprocess.run(['osascript', '-l', 'JavaScript', '-e', js],
                                capture_output=True, text=True, timeout=30)
             if r.returncode != 0:
@@ -193,7 +245,8 @@ def _hl_entry_block(data):
     note = (data.get('note', '') or '').strip()
     block = f"<!--hl:{hl_id}-->\n### {emoji} {ts}\n> {text}\n"
     if note:
-        block += f"> 💬 **备注**: {note}\n"
+        # 备注中的换行以字面 \n 存储（保持聚合文件单行，解析时还原）
+        block += f"> 💬 **备注**: {note.replace(chr(10), chr(92) + 'n')}\n"
     return block + "\n"
 
 
@@ -291,6 +344,9 @@ def parse_aggregated_md(fp):
                 if emoji_c == ts_m.group(1):
                     color = c
                     break
+        note_text = (note_m.group(1).strip() if note_m else '')
+        # 还原字面 \n 为真实换行
+        note_text = note_text.replace(chr(92) + 'n', chr(10))
         results.append({
             'id': hl_id,
             'url': meta.get('source', meta.get('url', '')),
@@ -298,7 +354,7 @@ def parse_aggregated_md(fp):
             'text': (quote_m.group(1).strip() if quote_m else ''),
             'color': color,
             'hex_color': VALID_COLORS.get(color, '#FFF176'),
-            'note': (note_m.group(1).strip() if note_m else ''),
+            'note': note_text,
             'created_at': (ts_m.group(2) if ts_m else ''),
             '_type': 'web',
             '_path': str(fp),
@@ -377,16 +433,20 @@ def parse_md_highlight(fp, content):
 
 
 def get_highlights_for_url(url):
-    """Get all web highlights for a specific URL (from its aggregated file)."""
-    fp = md_path_for_url(url)
+    """Get all web highlights for a specific URL (from its aggregated file).
+    Ignores URL fragments (#hl=...) so deep links still match."""
+    base = urllib.parse.urlsplit(url)._replace(fragment='').geturl()
+    fp = md_path_for_url(base)
     if not fp.exists():
         return []
-    return [h for h in parse_aggregated_md(fp) if h.get('url') == url]
+    return [h for h in parse_aggregated_md(fp) if h.get('url') in (base, url)]
 
 
 def delete_highlight(hl_id):
-    """Delete a highlight by ID from its aggregated source file."""
+    """Delete a highlight by ID from its aggregated source file.
+    Returns (count, url_of_deleted_highlight)."""
     count = 0
+    del_url = None
     for fp in SOURCES_DIR.glob('*.md'):
         try:
             content = fp.read_text(encoding='utf-8')
@@ -401,10 +461,11 @@ def delete_highlight(hl_id):
                     data['url'] = line.split(':', 1)[1].strip()
                     break
             if data['url']:
+                del_url = data['url']
                 upsert_highlight_in_md(data, remove=True)
                 count += 1
             break
-    return count
+    return count, del_url
 
 
 # ─── Web UI HTML ──────────────────────────────────────────────────────
@@ -745,8 +806,8 @@ class HighlightHandler(http.server.SimpleHTTPRequestHandler):
             return
 
         result = save_web_highlight(url, text, color, note, selector, page_title)
-        # 同步一条到 Apple Notes（异步，失败不影响保存）
-        sync_to_notes(color, text, note, page_title, url)
+        # 同步到 Apple Notes（按 URL 重建，异步）
+        sync_url_to_notes(url)
         self.send_json({'success': True, 'highlight': result})
 
     def handle_delete_highlight(self, data):
@@ -754,7 +815,9 @@ class HighlightHandler(http.server.SimpleHTTPRequestHandler):
         if not hl_id:
             self.send_json({'error': 'Missing id'}, 400)
             return
-        count = delete_highlight(hl_id)
+        count, del_url = delete_highlight(hl_id)
+        if count and del_url:
+            sync_url_to_notes(del_url)
         self.send_json({'success': True, 'deleted': count})
 
     def handle_clear_url_highlights(self):
@@ -788,6 +851,7 @@ class HighlightHandler(http.server.SimpleHTTPRequestHandler):
             if count:
                 break
         if count:
+            sync_url_to_notes(h.get('url', ''))
             self.send_json({'success': True, 'highlight': h})
         else:
             self.send_json({'error': 'Not found'}, 404)
@@ -839,7 +903,9 @@ class HighlightHandler(http.server.SimpleHTTPRequestHandler):
     }
 
     function loadHL() {
-        api('GET', '/api/highlights?url='+encodeURIComponent(location.href)).then(function(d) {
+        // 用不含 hash 的 URL 查询（#hl= 跳转链接也能匹配到高亮）
+        var baseUrl = location.origin + location.pathname + location.search;
+        api('GET', '/api/highlights?url='+encodeURIComponent(baseUrl)).then(function(d) {
             if (!d||!d.highlights) return;
             d.highlights.forEach(applyHL);
             console.log('[HL] Loaded', d.highlights.length);
@@ -878,12 +944,26 @@ class HighlightHandler(http.server.SimpleHTTPRequestHandler):
     }
     function inHL(el) { while(el) { if (el.tagName==='HL-SPAN') return true; el=el.parentElement; } return false; }
 
-    // ── Selection → Toolbar ──
+    // ── Selection → Toolbar or Edit ──
     document.addEventListener('mouseup', function(e) {
-        if (e.target.closest('hl-toolbar')||e.target.closest('hl-span')||e.target.closest('hl-tooltip')) return;
+        if (e.target.closest('hl-toolbar')||e.target.closest('hl-tooltip')) return;
         var sel = window.getSelection();
         if (!sel||sel.isCollapsed||!sel.toString().trim()) return;
-        showToolbar(sel.getRangeAt(0), sel.toString().trim());
+        var text = sel.toString().trim();
+        // 选中文本已高亮 → 直接编辑已有记录（不新建，避免重复存原文）
+        var sps = document.querySelectorAll('hl-span');
+        for (var i=0;i<sps.length;i++) {
+            if (sps[i].textContent.trim() === text) {
+                var h = {id: sps[i].getAttribute('data-hl-id'), text: text,
+                         color: sps[i].getAttribute('data-hl-color')||'yellow',
+                         note: sps[i].getAttribute('data-hl-note')||''};
+                showEdit(e, sps[i], h);
+                return;
+            }
+        }
+        // 点击已高亮 span 本身（非选中）→ 交给 span 的 click 处理
+        if (e.target.closest('hl-span')) return;
+        showToolbar(sel.getRangeAt(0), text);
     });
 
     document.addEventListener('mousedown', function(e) {
@@ -892,28 +972,8 @@ class HighlightHandler(http.server.SimpleHTTPRequestHandler):
 
     function showToolbar(range, text) {
         hideToolbar();
-        // Wrap selected text in a temporary transparent-blue span to replace native selection
-        var tempSpan = null;
-        try {
-            var c = range.cloneContents();
-            if (c.textContent.trim() === text) {
-                tempSpan = document.createElement('hl-temp');
-                tempSpan.style.cssText = 'background:rgba(59,130,246,0.2);border-radius:2px;padding:0 2px;';
-                range.surroundContents(tempSpan);
-            }
-        } catch(e) {}
-        // If surroundContents failed, range might be invalid; get current selection
-        if (!tempSpan) {
-            try {
-                var sel2 = window.getSelection();
-                if (sel2 && !sel2.isCollapsed) {
-                    range = sel2.getRangeAt(0);
-                    tempSpan = document.createElement('hl-temp');
-                    tempSpan.style.cssText = 'background:rgba(59,130,246,0.2);border-radius:2px;padding:0 2px;';
-                    range.surroundContents(tempSpan);
-                }
-            } catch(e2) {}
-        }
+        // 不包裹临时 span（会破坏 range 导致无法高亮），也不清除原生选中
+        // （保留标准的蓝色选中反馈；点颜色时才真正高亮）。
 
         var div = document.createElement('hl-toolbar');
         div.style.cssText = 'position:fixed;z-index:2147483647;font-family:sans-serif;font-size:13px;';
@@ -1136,6 +1196,29 @@ class HighlightHandler(http.server.SimpleHTTPRequestHandler):
 
     setTimeout(loadHL, 500);
     window.addEventListener('load', function(){setTimeout(loadHL,1000)});
+
+    // ── Deep link: 打开 #hl=<id> → 滚动到对应高亮并闪烁 ──
+    function jumpToHL() {
+        var m = location.hash.match(/^#hl=(.+)/);
+        if (!m) return;
+        var id = decodeURIComponent(m[1]);
+        var tries = 0;
+        var timer = setInterval(function() {
+            var sp = document.querySelector('hl-span[data-hl-id="'+id+'"]');
+            if (sp) {
+                clearInterval(timer);
+                sp.scrollIntoView({behavior:'smooth', block:'center'});
+                var oldOutline = sp.style.outline;
+                sp.style.outline = '3px solid #667eea';
+                setTimeout(function(){ sp.style.outline = oldOutline; }, 2500);
+            } else if (++tries > 20) {
+                clearInterval(timer); // ~10s 超时
+            }
+        }, 500);
+    }
+    window.addEventListener('hashchange', jumpToHL);
+    setTimeout(jumpToHL, 1000);
+
     console.log('[HL] Ready');
 })();
 """
